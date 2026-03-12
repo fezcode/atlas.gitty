@@ -340,16 +340,30 @@ func (g *GitRepo) Checkout(branch string) error {
 }
 
 func (g *GitRepo) CreateBranch(name string) error {
-	head, err := g.Repo.Head()
+	cmd := exec.Command("git", "branch", name)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to create branch: %v (output: %s)", err, string(out))
 	}
-	ref := plumbing.NewHashReference(plumbing.NewBranchReferenceName(name), head.Hash())
-	return g.Repo.Storer.SetReference(ref)
+	return nil
 }
 
 func (g *GitRepo) DeleteBranch(name string) error {
-	return g.Repo.Storer.RemoveReference(plumbing.NewBranchReferenceName(name))
+	// First try soft delete
+	cmd := exec.Command("git", "branch", "-d", name)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		// If soft delete fails, try force delete
+		cmd = exec.Command("git", "branch", "-D", name)
+		cmd.Dir = g.Path
+		out, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("failed to delete branch: %v (output: %s)", err, string(out))
+		}
+	}
+	return nil
 }
 
 func (g *GitRepo) CreateTag(name string) error {

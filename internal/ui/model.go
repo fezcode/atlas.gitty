@@ -541,7 +541,7 @@ func (m *Model) executeAction(action string) tea.Cmd {
 	case "MERGE":
 		if len(m.branchList) > 0 {
 			branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* "))
-			m.openMultiDialog(dialogMerge, "Merge From (Source Branch)", "Merge To (Target Branch)")
+			m.openMultiDialog(dialogMerge, "FROM (Source Branch)", "INTO (Destination Branch)")
 			m.textInput.SetValue(branch)
 			m.textInput2.SetValue(m.currentBranch)
 			m.dialogCheckbox = false
@@ -627,22 +627,41 @@ func (m *Model) handleDialogSubmit() {
 	case dialogDeleteRemote: err = m.currentRepo.DeleteRemote(v1); if err == nil { m.setStatus("Remote deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
 	case dialogMerge:
 		// v1 is From (Source), v2 is To (Target)
-		m.setStatus(fmt.Sprintf("Merging %s into %s...", v1, v2), false)
-		err = m.currentRepo.Checkout(v2)
-		if err == nil {
-			err = m.currentRepo.Merge(v1)
+		if v1 == v2 {
+			m.setStatus("Cannot merge a branch into itself.", true)
+			err = nil // Handled
+		} else {
+			m.setStatus(fmt.Sprintf("Merging %s into %s...", v1, v2), false)
+			err = m.currentRepo.Checkout(v2)
 			if err == nil {
-				m.setStatus(fmt.Sprintf("Successfully merged %s into %s.", v1, v2), false)
-				if m.dialogCheckbox {
-					errDel := m.currentRepo.DeleteBranch(v1)
-					if errDel == nil {
-						m.setStatus(fmt.Sprintf("Merged and deleted branch %s.", v1), false)
-					} else {
-						m.setStatus(fmt.Sprintf("Merged, but failed to delete branch %s: %v", v1, errDel), true)
+				err = m.currentRepo.Merge(v1)
+				if err == nil {
+					statusMsg := fmt.Sprintf("Successfully merged %s into %s.", v1, v2)
+					if m.dialogCheckbox {
+						// Protect main branches
+						lowV1 := strings.ToLower(v1)
+						if lowV1 == "main" || lowV1 == "master" || lowV1 == "develop" || lowV1 == "development" {
+							statusMsg += " (Skipped deleting protected branch " + v1 + ")"
+						} else {
+							errDel := m.currentRepo.DeleteBranch(v1)
+							if errDel == nil {
+								statusMsg = fmt.Sprintf("Merged %s into %s and deleted %s.", v1, v2, v1)
+							} else {
+								statusMsg += " (Failed to delete source: " + errDel.Error() + ")"
+							}
+						}
 					}
+					m.setStatus(statusMsg, false)
+					err = nil // Handled
+				} else {
+					m.setStatus("Merge failed: "+err.Error(), true)
+					err = nil // Handled
 				}
-			} else { m.setStatus("Merge failed: "+err.Error(), true) }
-		} else { m.setStatus("Checkout failed: "+err.Error(), true) }
+			} else {
+				m.setStatus("Checkout failed: "+err.Error(), true)
+				err = nil // Handled
+			}
+		}
 	case dialogUnlistRepo:
 		if strings.ToUpper(v1) == "YES" {
 			m.cfg.RemoveRepository(m.currentRepo.Path); _ = m.cfg.Save(); m.updateRepoList()
