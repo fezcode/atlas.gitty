@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
-	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
@@ -150,27 +149,23 @@ func (g *GitRepo) GetStatusItems() ([]StatusItem, error) {
 }
 
 func (g *GitRepo) StageFile(path string) error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "add", path)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git add failed: %v (output: %s)", err, string(out))
 	}
-	_, err = w.Add(path)
-	return err
+	return nil
 }
 
 func (g *GitRepo) UnstageFile(path string) error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "reset", "HEAD", path)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git reset HEAD failed: %v (output: %s)", err, string(out))
 	}
-	// go-git doesn't have a direct "unstage" that matches 'git reset HEAD <file>' easily in one call
-	// but we can use Reset with a specific file
-	head, err := g.Repo.Head()
-	if err != nil {
-		// If no HEAD, we might be in an empty repo, just Reset might work
-		return w.Reset(&git.ResetOptions{Files: []string{path}})
-	}
-	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{path}})
+	return nil
 }
 
 func (g *GitRepo) StageAll() error {
@@ -200,98 +195,63 @@ func (g *GitRepo) UnstageAll() error {
 }
 
 func (g *GitRepo) Fetch() (bool, error) {
-	err := g.Repo.Fetch(&git.FetchOptions{RemoteName: "origin"})
-	if err == nil {
-		return false, nil
-	}
-	if err == git.NoErrAlreadyUpToDate {
-		return false, nil
-	}
-
-	// Fallback to CLI
 	cmd := exec.Command("git", "fetch", "origin")
 	cmd.Dir = g.Path
-	out, cliErr := cmd.CombinedOutput()
-	if cliErr != nil {
-		return false, fmt.Errorf("git fetch failed: %v (output: %s)", cliErr, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("git fetch failed: %v (output: %s)", err, string(out))
 	}
 	return true, nil
 }
 
 func (g *GitRepo) Pull() (bool, error) {
-	w, err := g.Repo.Worktree()
-	if err != nil {
-		return false, err
-	}
-	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
-	if err == nil {
-		return false, nil
-	}
-	if err == git.NoErrAlreadyUpToDate {
-		return false, nil
-	}
-
-	// Fallback to CLI
 	cmd := exec.Command("git", "pull", "origin")
 	cmd.Dir = g.Path
-	out, cliErr := cmd.CombinedOutput()
-	if cliErr != nil {
-		return false, fmt.Errorf("git pull failed: %v (output: %s)", cliErr, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("git pull failed: %v (output: %s)", err, string(out))
 	}
 	return true, nil
 }
 
 func (g *GitRepo) Push() (bool, error) {
-	err := g.Repo.Push(&git.PushOptions{RemoteName: "origin"})
-	if err == nil {
-		return false, nil
-	}
-	if err == git.NoErrAlreadyUpToDate {
-		return false, nil
-	}
-
-	// Fallback to CLI
 	cmd := exec.Command("git", "push", "origin")
 	cmd.Dir = g.Path
-	out, cliErr := cmd.CombinedOutput()
-	if cliErr != nil {
-		return false, fmt.Errorf("git push failed: %v (output: %s)", cliErr, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("git push failed: %v (output: %s)", err, string(out))
 	}
 	return true, nil
 }
 
 func (g *GitRepo) PushTags() (bool, error) {
-	err := g.Repo.Push(&git.PushOptions{
-		RemoteName: "origin",
-		RefSpecs:   []gitconfig.RefSpec{"+refs/tags/*:refs/tags/*"},
-	})
-	if err == nil {
-		return false, nil
-	}
-	if err == git.NoErrAlreadyUpToDate {
-		return false, nil
-	}
-
-	// Fallback to CLI
 	cmd := exec.Command("git", "push", "origin", "--tags")
 	cmd.Dir = g.Path
-	out, cliErr := cmd.CombinedOutput()
-	if cliErr != nil {
-		return false, fmt.Errorf("git push tags failed: %v (output: %s)", cliErr, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("git push tags failed: %v (output: %s)", err, string(out))
 	}
 	return true, nil
 }
 
 func (g *GitRepo) CreateRemote(name, url string) error {
-	_, err := g.Repo.CreateRemote(&gitconfig.RemoteConfig{
-		Name: name,
-		URLs: []string{url},
-	})
-	return err
+	cmd := exec.Command("git", "remote", "add", name, url)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git remote add failed: %v (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 func (g *GitRepo) DeleteRemote(name string) error {
-	return g.Repo.DeleteRemote(name)
+	cmd := exec.Command("git", "remote", "remove", name)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git remote remove failed: %v (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 func (g *GitRepo) Amend(message string) error {
@@ -367,18 +327,23 @@ func (g *GitRepo) DeleteBranch(name string) error {
 }
 
 func (g *GitRepo) CreateTag(name string) error {
-	head, err := g.Repo.Head()
+	cmd := exec.Command("git", "tag", name)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git tag failed: %v (output: %s)", err, string(out))
 	}
-	_, err = g.Repo.CreateTag(name, head.Hash(), &git.CreateTagOptions{
-		Message: name,
-	})
-	return err
+	return nil
 }
 
 func (g *GitRepo) DeleteTag(name string) error {
-	return g.Repo.DeleteTag(name)
+	cmd := exec.Command("git", "tag", "-d", name)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git tag -d failed: %v (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 func (g *GitRepo) GetRemotes() ([]string, error) {
@@ -419,21 +384,23 @@ func (g *GitRepo) GetDiff(path string) (string, error) {
 }
 
 func (g *GitRepo) Commit(message string) error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "commit", "-m", message)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git commit failed: %v (output: %s)", err, string(out))
 	}
-	_, err = w.Commit(message, &git.CommitOptions{})
-	return err
+	return nil
 }
 
 func (g *GitRepo) Add(path string) error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "add", path)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git add failed: %v (output: %s)", err, string(out))
 	}
-	_, err = w.Add(path)
-	return err
+	return nil
 }
 
 func (g *GitRepo) GetCommits(limit int) ([]string, error) {
@@ -456,34 +423,29 @@ func (g *GitRepo) GetCommits(limit int) ([]string, error) {
 }
 
 func CloneRepo(url, path string) (bool, error) {
-	_, err := git.PlainClone(path, false, &git.CloneOptions{
-		URL:      url,
-		Progress: os.Stdout,
-	})
-	if err == nil {
-		return false, nil
-	}
-
-	// Fallback to CLI
 	cmd := exec.Command("git", "clone", url, path)
-	out, cliErr := cmd.CombinedOutput()
-	if cliErr != nil {
-		return false, fmt.Errorf("git clone failed: %v (output: %s)", cliErr, string(out))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return true, fmt.Errorf("git clone failed: %v (output: %s)", err, string(out))
 	}
 	return true, nil
 }
 
 func InitRepo(path string) error {
-	_, err := git.PlainInit(path, false)
-	return err
+	cmd := exec.Command("git", "init", path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git init failed: %v (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 func (g *GitRepo) Reset(path string) error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "reset", path)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git reset failed: %v (output: %s)", err, string(out))
 	}
-	return w.Reset(&git.ResetOptions{
-		Files: []string{path},
-	})
+	return nil
 }
