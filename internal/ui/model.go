@@ -496,12 +496,36 @@ func (m *Model) handleDialogSubmit() {
 	if v1 == "" && m.activeDlg != dialogCommit && m.activeDlg != dialogAmend { return }
 	var err error
 	switch m.activeDlg {
-	case dialogAddRepo: repo, errOpen := git.OpenRepo(v1); if errOpen == nil { m.cfg.AddRepository(repo.Path); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Repo added.", false) } else { m.setStatus("Invalid git repo: "+errOpen.Error(), true) }; m.state = welcomeView; return
+	case dialogAddRepo:
+		absPath, errAbs := filepath.Abs(v1)
+		if errAbs != nil { m.setStatus("Invalid path: "+errAbs.Error(), true); return }
+		repo, errOpen := git.OpenRepo(absPath)
+		if errOpen == nil {
+			m.cfg.AddRepository(repo.Path)
+			_ = m.cfg.Save()
+			m.updateRepoList()
+			m.setStatus("Repo added: "+repo.Path, false)
+		} else { m.setStatus("Invalid git repo: "+errOpen.Error(), true) }
+		m.state = welcomeView
+		return
 	case dialogCloneRepo:
 		dest := v2
 		if !filepath.IsAbs(dest) { cwd, _ := filepath.Abs("."); dest = filepath.Join(cwd, v2) }
-		m.setStatus("Cloning to "+dest+"...", false); err = git.CloneRepo(v1, dest); if err == nil { m.cfg.AddRepository(dest); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Cloned.", false) } else { m.setStatus("Clone failed: "+err.Error(), true) }; m.state = welcomeView; return
-	case dialogInitRepo: err = git.InitRepo(v1); if err == nil { m.cfg.AddRepository(v1); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Initialized.", false) } else { m.setStatus("Init failed: "+err.Error(), true) }; m.state = welcomeView; return
+		absDest, _ := filepath.Abs(dest)
+		m.setStatus("Cloning to "+absDest+"...", false); err = git.CloneRepo(v1, absDest)
+		if err == nil {
+			m.cfg.AddRepository(absDest); _ = m.cfg.Save(); m.updateRepoList()
+			m.setStatus("Cloned to "+absDest, false)
+		} else { m.setStatus("Clone failed: "+err.Error(), true) }
+		m.state = welcomeView; return
+	case dialogInitRepo:
+		absPath, _ := filepath.Abs(v1)
+		err = git.InitRepo(absPath)
+		if err == nil {
+			m.cfg.AddRepository(absPath); _ = m.cfg.Save(); m.updateRepoList()
+			m.setStatus("Initialized at "+absPath, false)
+		} else { m.setStatus("Init failed: "+err.Error(), true) }
+		m.state = welcomeView; return
 	case dialogCommit: err = m.currentRepo.Commit(v1); if err == nil { m.setStatus("Committed.", false) } else { m.setStatus("Commit failed: "+err.Error(), true) }
 	case dialogAmend: err = m.currentRepo.Amend(v1); if err == nil { m.setStatus("Amended.", false) } else { m.setStatus("Amend failed: "+err.Error(), true) }
 	case dialogCherryPick: err = m.currentRepo.CherryPick(v1); if err == nil { m.setStatus("Cherry-picked.", false) } else { m.setStatus("Cherry-pick failed: "+err.Error(), true) }
@@ -533,15 +557,25 @@ func (m *Model) handleDialogSubmit() {
 
 func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
-	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 6
+	
+	sidebarWidth := 26
+	mainWidth := m.width - sidebarWidth - 6 // Extra margin for right border
 	if mainWidth < 10 { mainWidth = 10 }
-	contentHeight := m.height - 8
+	
+	contentHeight := m.height - 8 // Extra margin for top/bottom
 	if contentHeight < 10 { contentHeight = 10 }
-	logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
+	
+	logHeight := contentHeight / 2
+	viewHeight := contentHeight - logHeight
+	
 	m.sidebarList.SetSize(sidebarWidth-4, contentHeight-2)
-	m.logViewport.Width = mainWidth - 4; m.logViewport.Height = logHeight - 4
+	
+	m.logViewport.Width = mainWidth - 4
+	m.logViewport.Height = logHeight - 4
 	if m.logViewport.Height < 1 { m.logViewport.Height = 1 }
-	m.contentViewport.Width = mainWidth - 4; m.contentViewport.Height = viewHeight - 2
+	
+	m.contentViewport.Width = mainWidth - 4
+	m.contentViewport.Height = viewHeight - 2
 	if m.contentViewport.Height < 1 { m.contentViewport.Height = 1 }
 }
 
