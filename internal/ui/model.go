@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"atlas.git/internal/config"
-	"atlas.git/internal/git"
+	"atlas.gitty/internal/config"
+	"atlas.gitty/internal/git"
 )
 
 type sessionState int
@@ -548,7 +548,7 @@ func (m *Model) refreshTabContent() {
 	case tabRemotes: m.renderListView("REMOTES", m.remoteList, &m.remoteIdx)
 	case tabDiff: d, _ := m.currentRepo.GetDiff(""); m.logViewport.SetContent(d)
 	case tabHelp:
-		helpText := HeaderStyle.Render("ATLAS.GIT USAGE GUIDE") + "\n\n" +
+		helpText := HeaderStyle.Render("ATLAS.GITTY USAGE GUIDE") + "\n\n" +
 			SelectedStyle.Render("LAYOUT") + "\n" +
 			"• Sidebar (Left): Repository navigation (Branches, Tags, Remotes).\n" +
 			"• Main Pane (Top Right): Active tab content and Action Bar.\n" +
@@ -626,7 +626,7 @@ func (m Model) View() string {
 
 func (m Model) renderHeader() string {
 	repoName := "NO REPOSITORY"; if m.currentRepo != nil { repoName = filepath.Base(m.currentRepo.Path) }
-	title := HeaderStyle.Render(" ATLAS.GIT "); repoInfo := PathStyle.Render(" " + repoName + " "); branchInfo := ""
+	title := HeaderStyle.Render(" ATLAS.GITTY "); repoInfo := PathStyle.Render(" " + repoName + " "); branchInfo := ""
 	if m.currentBranch != "" { branchInfo = SuccessStyle.Render("  " + m.currentBranch + " ") }
 	left := lipgloss.JoinHorizontal(lipgloss.Center, title, repoInfo, branchInfo); return HeaderBoxStyle.Width(m.width).Render(left)
 }

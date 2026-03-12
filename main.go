@@ -5,14 +5,14 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"atlas.git/internal/ui"
+	"atlas.gitty/internal/ui"
 )
 
 var Version = "dev"
 
 func main() {
 	if len(os.Args) > 1 && (os.Args[1] == "-v" || os.Args[1] == "--version") {
-		fmt.Printf("atlas.git v%s\n", Version)
+		fmt.Printf("atlas.gitty v%s\n", Version)
 		return
 	}
 

@@ -1,4 +1,4 @@
-module atlas.git
+module atlas.gitty
 
 go 1.25.3
 
