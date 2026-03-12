@@ -96,7 +96,7 @@ func (g *GitRepo) GetGraph(limit int) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get graph: %v (output: %s)", err, string(out))
 	}
-	return string(out), nil
+	return strings.ReplaceAll(string(out), "\r", "^M"), nil
 }
 
 type StatusItem struct {
@@ -405,7 +405,7 @@ func (g *GitRepo) GetCommitDiff(hash string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	return strings.ReplaceAll(string(out), "\r", "^M"), nil
 }
 
 func (g *GitRepo) GetDiff(path string) (string, error) {
@@ -415,7 +415,7 @@ func (g *GitRepo) GetDiff(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	return strings.ReplaceAll(string(out), "\r", "^M"), nil
 }
 
 func (g *GitRepo) Commit(message string) error {

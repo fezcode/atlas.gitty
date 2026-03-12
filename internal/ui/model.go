@@ -682,8 +682,8 @@ func (m *Model) handleDialogSubmit() {
 }
 
 func (m *Model) updateSizes() {
-	m.repoList.SetSize(m.width-4, m.height-6)
-	
+	m.repoList.SetSize(m.width-8, m.height-12)
+
 	sidebarWidth := 26
 	mainWidth := m.width - sidebarWidth - 6 // Extra margin for right border
 	if mainWidth < 10 { mainWidth = 10 }
@@ -878,7 +878,15 @@ func (m Model) renderWelcome() string {
 	box := MainBoxStyle.Copy().Padding(1, 4).BorderForeground(Magenta).Render(lipgloss.JoinVertical(lipgloss.Center, HeaderStyle.Render("ATLAS GIT CLIENT"), "\n", menu)); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box)
 }
 
-func (m Model) renderRepoSelect() string { box := MainBoxStyle.Copy().Width(m.width - 4).Height(m.height - 8).Render(m.repoList.View()); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box) }
+func (m Model) renderRepoSelect() string {
+	ui := lipgloss.JoinVertical(lipgloss.Left,
+		m.repoList.View(),
+		"\n",
+		InactiveStyle.Copy().Italic(true).Render("  press delete to remove from list | esc to go back"),
+	)
+	box := MainBoxStyle.Copy().Padding(1, 2).Width(m.width - 4).Height(m.height - 8).Render(ui)
+	return lipgloss.Place(m.width, m.height - 6, lipgloss.Center, lipgloss.Center, box)
+}
 
 func (m Model) renderMain() string {
 	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 6; contentHeight := m.height - 8
@@ -899,10 +907,11 @@ func (m Model) renderDialog() string {
 	switch m.activeDlg {
 	case dialogMerge:
 		title = "MERGE BRANCHES"
-		extra = "\n" + SuccessStyle.Render(" Merge ") + " " + m.textInput.Value() + " " + SuccessStyle.Render(" into ") + " " + m.textInput2.Value() + "\n"
-		cb := "[ ] Delete source branch after merge"
+		source := m.textInput.Value()
+		extra = "\n" + SuccessStyle.Render(" Merge ") + " " + source + " " + SuccessStyle.Render(" into ") + " " + m.textInput2.Value() + "\n"
+		cb := fmt.Sprintf("[ ] Delete source branch (%s) after merge", source)
 		if m.dialogCheckbox {
-			cb = "[x] Delete source branch after merge"
+			cb = fmt.Sprintf("[x] Delete source branch (%s) after merge", source)
 		}
 		extra += "\n" + InactiveStyle.Render(cb) + " (ctrl+d to toggle)\n"
 	case dialogCommit:
