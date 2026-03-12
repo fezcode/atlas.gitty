@@ -1,0 +1,8 @@
+atlas.git
+atlas.git.exe
+vendor/
+*.log
+.idea/
+build/
+.vscode/
+*.exe~
