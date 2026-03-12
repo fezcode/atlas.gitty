@@ -186,6 +186,7 @@ type Model struct {
 	textInput  textinput.Model
 	textInput2 textinput.Model 
 	isMultiInput bool
+	dialogCheckbox bool
 
 	// UI Helpers
 	help    help.Model
@@ -395,6 +396,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case dialogView:
+			if msg.String() == "ctrl+d" && m.activeDlg == dialogMerge {
+				m.dialogCheckbox = !m.dialogCheckbox
+				return m, nil
+			}
 			if msg.String() == "esc" { m.state = mainView; if m.currentRepo == nil { m.state = welcomeView } } else if msg.String() == "enter" { m.handleDialogSubmit() } else if msg.String() == "tab" && m.isMultiInput {
 				if m.textInput.Focused() { m.textInput.Blur(); m.textInput2.Focus() } else { m.textInput2.Blur(); m.textInput.Focus() }
 			}
@@ -533,7 +538,14 @@ func (m *Model) executeAction(action string) tea.Cmd {
 		}
 	case "NEW BRANCH": m.openDialog(dialogCreateBranch, "New branch name...")
 	case "DELETE BRANCH": if len(m.branchList) > 0 { branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* ")); m.openDialog(dialogDeleteBranch, "Type branch name to DELETE: "+branch) }
-	case "MERGE": if len(m.branchList) > 0 { branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* ")); m.openDialog(dialogMerge, "Merge '" + branch + "' into '" + m.currentBranch + "'? (Type YES to confirm)") }
+	case "MERGE":
+		if len(m.branchList) > 0 {
+			branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* "))
+			m.openMultiDialog(dialogMerge, "Merge From (Source Branch)", "Merge To (Target Branch)")
+			m.textInput.SetValue(branch)
+			m.textInput2.SetValue(m.currentBranch)
+			m.dialogCheckbox = false
+		}
 	case "NEW TAG": m.openDialog(dialogCreateTag, "New tag name...")
 	case "DELETE TAG": if len(m.tagList) > 0 { tag := m.tagList[m.tagIdx]; m.openDialog(dialogDeleteTag, "Type tag name to DELETE: "+tag) }
 	case "PUSH TAGS":
@@ -614,11 +626,23 @@ func (m *Model) handleDialogSubmit() {
 	case dialogAddRemote: err = m.currentRepo.CreateRemote(v1, v2); if err == nil { m.setStatus("Remote added: "+v1, false) } else { m.setStatus("Add failed: "+err.Error(), true) }
 	case dialogDeleteRemote: err = m.currentRepo.DeleteRemote(v1); if err == nil { m.setStatus("Remote deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
 	case dialogMerge:
-		if strings.ToUpper(v1) == "YES" {
-			branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* "))
-			err = m.currentRepo.Merge(branch)
-			if err == nil { m.setStatus("Merged '"+branch+"' into '"+m.currentBranch+"'.", false) } else { m.setStatus("Merge failed: "+err.Error(), true) }
-		}
+		// v1 is From (Source), v2 is To (Target)
+		m.setStatus(fmt.Sprintf("Merging %s into %s...", v1, v2), false)
+		err = m.currentRepo.Checkout(v2)
+		if err == nil {
+			err = m.currentRepo.Merge(v1)
+			if err == nil {
+				m.setStatus(fmt.Sprintf("Successfully merged %s into %s.", v1, v2), false)
+				if m.dialogCheckbox {
+					errDel := m.currentRepo.DeleteBranch(v1)
+					if errDel == nil {
+						m.setStatus(fmt.Sprintf("Merged and deleted branch %s.", v1), false)
+					} else {
+						m.setStatus(fmt.Sprintf("Merged, but failed to delete branch %s: %v", v1, errDel), true)
+					}
+				}
+			} else { m.setStatus("Merge failed: "+err.Error(), true) }
+		} else { m.setStatus("Checkout failed: "+err.Error(), true) }
 	case dialogUnlistRepo:
 		if strings.ToUpper(v1) == "YES" {
 			m.cfg.RemoveRepository(m.currentRepo.Path); _ = m.cfg.Save(); m.updateRepoList()
@@ -720,7 +744,8 @@ func (m *Model) refreshTabContent() {
 			SelectedStyle.Render("INTERACTIONS") + "\n" +
 			"• Main Pane (Active): Use Arrows to scroll lists. Press UP from top to reach Action Bar.\n" +
 			"• Sidebar (Active): Use Arrows to select, Enter to checkout branch.\n" +
-			"• Action Bar: Use Left/Right to select a button, Enter to execute.\n\n" +
+			"• Action Bar: Use Left/Right to select a button, Enter to execute.\n" +
+			"• Merge Dialog: Use Ctrl+D to toggle source branch deletion after merge.\n\n" +
 			SelectedStyle.Render("AUTHENTICATION & FALLBACK") + "\n" +
 			"• PUSH/PULL/FETCH operations first attempt using internal library.\n" +
 			"• If authentication fails (e.g. SSH/HTTPS creds), it falls back to system 'git' CLI.\n" +
@@ -849,4 +874,37 @@ func (m Model) renderMain() string {
 	contentArea := contentStyle.Render(m.contentViewport.View()); return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, lipgloss.JoinVertical(lipgloss.Left, logArea, contentArea))
 }
 
-func (m Model) renderDialog() string { inputUI := m.textInput.View(); if m.isMultiInput { inputUI = lipgloss.JoinVertical(lipgloss.Left, m.textInput.View(), "\n", m.textInput2.View()) }; ui := lipgloss.JoinVertical(lipgloss.Left, HeaderStyle.Render("INPUT"), "\n", inputUI, "\n", InactiveStyle.Render("enter: confirm | esc: cancel")); box := MainBoxStyle.Copy().Padding(1, 2).Width(60).BorderForeground(Magenta); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box.Render(ui)) }
+func (m Model) renderDialog() string {
+	title := "INPUT"
+	var extra string
+	switch m.activeDlg {
+	case dialogMerge:
+		title = "MERGE BRANCHES"
+		extra = "\n" + SuccessStyle.Render(" Merge ") + " " + m.textInput.Value() + " " + SuccessStyle.Render(" into ") + " " + m.textInput2.Value() + "\n"
+		cb := "[ ] Delete source branch after merge"
+		if m.dialogCheckbox {
+			cb = "[x] Delete source branch after merge"
+		}
+		extra += "\n" + InactiveStyle.Render(cb) + " (ctrl+d to toggle)\n"
+	case dialogCommit:
+		title = "COMMIT CHANGES"
+	case dialogCreateBranch:
+		title = "CREATE BRANCH"
+	case dialogDeleteBranch:
+		title = "DELETE BRANCH"
+	case dialogAddRepo:
+		title = "ADD REPOSITORY"
+	case dialogCloneRepo:
+		title = "CLONE REPOSITORY"
+	case dialogInitRepo:
+		title = "INIT REPOSITORY"
+	}
+
+	inputUI := m.textInput.View()
+	if m.isMultiInput {
+		inputUI = lipgloss.JoinVertical(lipgloss.Left, m.textInput.View(), "\n", m.textInput2.View())
+	}
+	ui := lipgloss.JoinVertical(lipgloss.Left, HeaderStyle.Render(title), extra, inputUI, "\n", InactiveStyle.Render("enter: confirm | esc: cancel"))
+	box := MainBoxStyle.Copy().Padding(1, 2).Width(60).BorderForeground(Magenta)
+	return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box.Render(ui))
+}
