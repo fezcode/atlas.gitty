@@ -1,4 +1,4 @@
 (name) atlas.gitty
-(version) 0.4.1
+(version) 0.4.2
 (description) Comprehensive TUI git client with graphs, branch, tag, and multi-repo management.
 (license) MIT
