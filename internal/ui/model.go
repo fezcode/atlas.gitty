@@ -266,7 +266,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch m.welcomeIdx {
 				case 0: m.state = repoSelectView
 				case 1: m.openDialog(dialogAddRepo, "Path to local repo...")
-				case 2: m.openMultiDialog(dialogAddRepo, "Repository URL...", "Destination Path...") // Reuse dialog logic
+				case 2: m.openMultiDialog(dialogAddRepo, "Repository URL...", "Destination Path...")
 				case 3: m.openDialog(dialogInitRepo, "Path to new repo...")
 				}
 			}
@@ -492,14 +492,27 @@ func (m *Model) handleDialogSubmit() {
 
 func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
-	sidebarWidth := 30; mainWidth := m.width - sidebarWidth - 2
-	headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 1
+	
+	sidebarWidth := 30
+	mainWidth := m.width - sidebarWidth - 2 // Conservative width
+	
+	headerHeight := 2
+	footerHeight := 2
+	contentHeight := m.height - headerHeight - footerHeight
+	
 	if contentHeight < 10 { contentHeight = 10 }
-	logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
-	m.sidebarList.SetSize(sidebarWidth-2, contentHeight-2)
-	m.logViewport.Width = mainWidth - 4; m.logViewport.Height = logHeight - 6 
+	
+	logHeight := contentHeight / 2
+	viewHeight := contentHeight - logHeight
+	
+	m.sidebarList.SetSize(sidebarWidth-4, contentHeight-2)
+	
+	m.logViewport.Width = mainWidth - 4
+	m.logViewport.Height = logHeight - 4 // Reduced overhead
 	if m.logViewport.Height < 1 { m.logViewport.Height = 1 }
-	m.contentViewport.Width = mainWidth - 4; m.contentViewport.Height = viewHeight - 2
+	
+	m.contentViewport.Width = mainWidth - 4
+	m.contentViewport.Height = viewHeight - 2
 	if m.contentViewport.Height < 1 { m.contentViewport.Height = 1 }
 }
 
@@ -621,6 +634,7 @@ func (m Model) View() string {
 	case mainView: content = m.renderMain()
 	case dialogView: content = m.renderDialog()
 	}
+	// Direct join without extra characters
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
 
@@ -644,14 +658,14 @@ func (m Model) renderWelcome() string {
 func (m Model) renderRepoSelect() string { box := MainBoxStyle.Copy().Width(m.width - 4).Height(m.height - 8).Render(m.repoList.View()); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box) }
 
 func (m Model) renderMain() string {
-	sidebarWidth := 30; mainWidth := m.width - sidebarWidth - 2; headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 1
+	sidebarWidth := 30; mainWidth := m.width - sidebarWidth - 2; headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight
 	if contentHeight < 10 { contentHeight = 10 }; logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
 	sbStyle := MainBoxStyle.Copy().Width(sidebarWidth).Height(contentHeight); if m.focus == focusSidebar { if m.isEntered { sbStyle = sbStyle.BorderForeground(Green) } else { sbStyle = sbStyle.BorderForeground(Pink) } }
 	sidebar := sbStyle.Render(m.sidebarList.View()); tabs := []string{"LOG", "STAGE", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP"}
 	tabHeader := ""; for i, t := range tabs { style := InactiveStyle.Copy().Padding(0, 1); if int(m.activeTab) == i { style = SelectedStyle.Copy().Padding(0, 1).Underline(true) }; tabHeader += style.Render(t) }
 	actionItems := m.getActionsForTab(); actionBar := ""; for i, a := range actionItems { style := InactiveStyle.Copy().Padding(0, 1).Background(DarkGray); if m.focus == focusMain && m.isEntered && m.subFocus == subAreaActions && i == m.actionIdx { style = SelectedStyle.Copy().Padding(0, 1).Background(Magenta).Foreground(White) }; actionBar += style.Render(a) + " " }
 	logStyle := MainBoxStyle.Copy().Width(mainWidth).Height(logHeight); if m.focus == focusMain { if m.isEntered { logStyle = logStyle.BorderForeground(Green) } else { logStyle = logStyle.BorderForeground(Pink) } }
-	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabHeader, "", actionBar, "", m.logViewport.View()))
+	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabHeader, actionBar, m.logViewport.View()))
 	contentStyle := MainBoxStyle.Copy().Width(mainWidth).Height(viewHeight); if m.focus == focusContent { if m.isEntered { contentStyle = contentStyle.BorderForeground(Green) } else { contentStyle = contentStyle.BorderForeground(Pink) } }
 	contentArea := contentStyle.Render(m.contentViewport.View()); return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, lipgloss.JoinVertical(lipgloss.Left, logArea, contentArea))
 }
