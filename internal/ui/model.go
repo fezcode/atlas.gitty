@@ -197,7 +197,7 @@ func NewInitialModel() Model {
 
 	items := []list.Item{}
 	for _, r := range cfg.Repositories {
-		items = append(items, item{title: filepath.Base(r.Path), desc: r.Path})
+		items = append(items, item{title: r.Path, desc: r.Path})
 	}
 
 	delegate := list.NewDefaultDelegate()
@@ -533,9 +533,9 @@ func (m *Model) handleDialogSubmit() {
 
 func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
-	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 4
+	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 6
 	if mainWidth < 10 { mainWidth = 10 }
-	headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 4
+	contentHeight := m.height - 8
 	if contentHeight < 10 { contentHeight = 10 }
 	logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
 	m.sidebarList.SetSize(sidebarWidth-4, contentHeight-2)
@@ -559,7 +559,7 @@ func (m *Model) setStatus(msg string, isErr bool) {
 
 func (m *Model) updateRepoList() {
 	items := []list.Item{}
-	for _, r := range m.cfg.Repositories { items = append(items, item{title: filepath.Base(r.Path), desc: r.Path}) }
+	for _, r := range m.cfg.Repositories { items = append(items, item{title: r.Path, desc: r.Path}) }
 	m.repoList.SetItems(items)
 }
 
@@ -667,6 +667,7 @@ func (m Model) View() string {
 	case mainView: content = m.renderMain()
 	case dialogView: content = m.renderDialog()
 	}
+	// Strict vertical join with no manual spacing to prevent overlap
 	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
 }
 
@@ -681,9 +682,12 @@ func (m Model) renderFooter() string {
 	var msg string; if m.lastMsg != "" { style := SuccessMessageStyle; if m.isError { style = ErrorMessageStyle }; msg = style.Render(m.lastMsg) }
 	helpStr := m.help.View(keys)
 	
-	// CWD display on the left
+	// CWD display on the left (truncated)
+	maxCwdWidth := m.width / 3
+	cwdText := "Run from: " + m.cwd
+	if len(cwdText) > maxCwdWidth { cwdText = "..." + cwdText[len(cwdText)-maxCwdWidth+3:] }
 	cwdStyle := lipgloss.NewStyle().Foreground(Blue).Italic(true).Padding(0, 1)
-	cwdStr := cwdStyle.Render("Run from: " + m.cwd)
+	cwdStr := cwdStyle.Render(cwdText)
 	
 	gap := m.width - lipgloss.Width(cwdStr) - lipgloss.Width(msg) - lipgloss.Width(helpStr) - 2
 	if gap < 0 { gap = 0 }
@@ -702,7 +706,7 @@ func (m Model) renderWelcome() string {
 func (m Model) renderRepoSelect() string { box := MainBoxStyle.Copy().Width(m.width - 4).Height(m.height - 8).Render(m.repoList.View()); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box) }
 
 func (m Model) renderMain() string {
-	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 4; headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 4
+	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 6; contentHeight := m.height - 8
 	if contentHeight < 10 { contentHeight = 10 }; logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
 	sbStyle := MainBoxStyle.Copy().Width(sidebarWidth).Height(contentHeight); if m.focus == focusSidebar { if m.isEntered { sbStyle = sbStyle.BorderForeground(Green) } else { sbStyle = sbStyle.BorderForeground(Pink) } }
 	sidebar := sbStyle.Render(m.sidebarList.View()); tabs := []string{"LOG", "STAGE", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP", "REPO"}
