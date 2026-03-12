@@ -30,9 +30,15 @@ type focusArea int
 
 const (
 	focusSidebar focusArea = iota
-	focusActions
-	focusLog
-	focusContent
+	focusMain    // Top Pane: Tabs + Actions + Viewport
+	focusContent // Bottom Pane: Viewport
+)
+
+type focusSubArea int
+
+const (
+	subAreaList focusSubArea = iota
+	subAreaActions
 )
 
 type tab int
@@ -80,8 +86,8 @@ var keys = keyMap{
 	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
 	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
 	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
-	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/action")),
-	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
+	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "enter/action")),
+	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "exit/back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Help:  key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next focus")),
@@ -112,6 +118,8 @@ func (i item) FilterValue() string { return i.title }
 type Model struct {
 	state       sessionState
 	focus       focusArea
+	isEntered   bool
+	subFocus    focusSubArea
 	activeTab   tab
 	activeDlg   dialogType
 	width       int
@@ -206,7 +214,7 @@ func NewInitialModel() Model {
 		textInput:   ti,
 		textInput2:  ti2,
 		help:        h,
-		focus:       focusLog,
+		focus:       focusMain,
 	}
 }
 
@@ -226,7 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateSizes()
 
 	case tea.KeyMsg:
-		if key.Matches(msg, keys.Quit) && m.state != dialogView {
+		if key.Matches(msg, keys.Quit) && m.state != dialogView && !m.isEntered {
 			return m, tea.Quit
 		}
 
@@ -276,109 +284,124 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case mainView:
-			if key.Matches(msg, keys.Tab) {
-				m.focus = (m.focus + 1) % 4
-				return m, nil
-			}
-			if key.Matches(msg, keys.ShiftTab) {
-				m.focus = (m.focus + 3) % 4
-				return m, nil
-			}
+			if !m.isEntered {
+				// NAVIGATION MODE
+				if key.Matches(msg, keys.Tab) {
+					m.focus = (m.focus + 1) % 3
+					return m, nil
+				}
+				if key.Matches(msg, keys.ShiftTab) {
+					m.focus = (m.focus + 2) % 3
+					return m, nil
+				}
+				if key.Matches(msg, keys.Enter) {
+					m.isEntered = true
+					m.subFocus = subAreaList
+					return m, nil
+				}
+				if key.Matches(msg, keys.Back) {
+					m.state = welcomeView
+					return m, nil
+				}
+			} else {
+				// INTERACTION MODE (ACTIVE BUBBLE)
+				if key.Matches(msg, keys.Back) {
+					m.isEntered = false
+					return m, nil
+				}
 
-			switch m.focus {
-			case focusSidebar:
-				if key.Matches(msg, keys.Right) { m.focus = focusLog; return m, nil }
-				switch {
-				case key.Matches(msg, keys.Enter):
-					if i := m.sidebarList.SelectedItem(); i != nil {
-						title := i.(item).title
-						if strings.HasPrefix(title, "B: ") {
-							branch := strings.TrimPrefix(title, "B: ")
-							branch = strings.TrimPrefix(branch, "* ")
-							branch = strings.TrimSpace(branch)
-							err := m.currentRepo.Checkout(branch)
-							if err == nil {
-								m.setStatus("Checked out "+branch, false)
-								m.refreshRepoData()
-							} else {
-								m.setStatus("Error: "+err.Error(), true)
+				switch m.focus {
+				case focusSidebar:
+					switch {
+					case key.Matches(msg, keys.Enter):
+						if i := m.sidebarList.SelectedItem(); i != nil {
+							title := i.(item).title
+							if strings.HasPrefix(title, "B: ") {
+								branch := strings.TrimPrefix(title, "B: ")
+								branch = strings.TrimPrefix(branch, "* ")
+								branch = strings.TrimSpace(branch)
+								err := m.currentRepo.Checkout(branch)
+								if err == nil {
+									m.setStatus("Checked out "+branch, false)
+									m.refreshRepoData()
+								} else {
+									m.setStatus("Error: "+err.Error(), true)
+								}
 							}
 						}
 					}
-				}
-				m.sidebarList, cmd = m.sidebarList.Update(msg)
-				cmds = append(cmds, cmd)
+					m.sidebarList, cmd = m.sidebarList.Update(msg)
+					cmds = append(cmds, cmd)
 
-			case focusActions:
-				actions := m.getActionsForTab()
-				switch {
-				case key.Matches(msg, keys.Left):
-					if m.actionIdx > 0 { m.actionIdx-- }
-				case key.Matches(msg, keys.Right):
-					if m.actionIdx < len(actions)-1 { m.actionIdx++ }
-				case key.Matches(msg, keys.Down):
-					m.focus = focusLog
-				case key.Matches(msg, keys.Enter):
-					if len(actions) > 0 {
-						m.executeAction(actions[m.actionIdx])
-					}
-				}
-
-			case focusLog:
-				switch {
-				case key.Matches(msg, keys.Up):
-					if m.activeTab == tabGraph && m.commitIdx == 0 { m.focus = focusActions; return m, nil }
-					if m.activeTab == tabStage && m.statusIdx == 0 { m.focus = focusActions; return m, nil }
+				case focusMain:
+					actions := m.getActionsForTab()
 					
-					switch m.activeTab {
-					case tabGraph:
-						if m.commitIdx > 0 { m.commitIdx--; m.updateDiffFromCommit() }
-					case tabStage:
-						if m.statusIdx > 0 { m.statusIdx--; m.updateDiffFromStatus() }
-					}
-				case key.Matches(msg, keys.Down):
-					switch m.activeTab {
-					case tabGraph:
-						if m.commitIdx < len(m.commits)-1 { m.commitIdx++; m.updateDiffFromCommit() }
-					case tabStage:
-						if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.updateDiffFromStatus() }
-					}
-				case key.Matches(msg, keys.Enter):
-					if m.activeTab == tabStage && len(m.statusItems) > 0 {
-						item := m.statusItems[m.statusIdx]
-						var err error
-						if item.Staged {
-							err = m.currentRepo.UnstageFile(item.Path)
-						} else {
-							err = m.currentRepo.StageFile(item.Path)
+					if m.subFocus == subAreaActions {
+						switch {
+						case key.Matches(msg, keys.Left):
+							if m.actionIdx > 0 { m.actionIdx-- }
+						case key.Matches(msg, keys.Right):
+							if m.actionIdx < len(actions)-1 { m.actionIdx++ }
+						case key.Matches(msg, keys.Down):
+							m.subFocus = subAreaList
+						case key.Matches(msg, keys.Enter):
+							if len(actions) > 0 {
+								m.executeAction(actions[m.actionIdx])
+							}
 						}
-						if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
-					}
-				case key.Matches(msg, keys.Left):
-					if m.activeTab > 0 {
-						m.activeTab--
-						m.actionIdx = 0
-						m.refreshTabContent()
 					} else {
-						m.focus = focusSidebar
+						// subAreaList
+						switch {
+						case key.Matches(msg, keys.Up):
+							if m.activeTab == tabGraph && m.commitIdx == 0 { m.subFocus = subAreaActions; return m, nil }
+							if m.activeTab == tabStage && m.statusIdx == 0 { m.subFocus = subAreaActions; return m, nil }
+							
+							switch m.activeTab {
+							case tabGraph:
+								if m.commitIdx > 0 { m.commitIdx--; m.updateDiffFromCommit() }
+							case tabStage:
+								if m.statusIdx > 0 { m.statusIdx--; m.updateDiffFromStatus() }
+							}
+						case key.Matches(msg, keys.Down):
+							switch m.activeTab {
+							case tabGraph:
+								if m.commitIdx < len(m.commits)-1 { m.commitIdx++; m.updateDiffFromCommit() }
+							case tabStage:
+								if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.updateDiffFromStatus() }
+							}
+						case key.Matches(msg, keys.Enter):
+							if m.activeTab == tabStage && len(m.statusItems) > 0 {
+								item := m.statusItems[m.statusIdx]
+								var err error
+								if item.Staged {
+									err = m.currentRepo.UnstageFile(item.Path)
+								} else {
+									err = m.currentRepo.StageFile(item.Path)
+								}
+								if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
+							}
+						case key.Matches(msg, keys.Left):
+							if m.activeTab > 0 {
+								m.activeTab--
+								m.actionIdx = 0
+								m.refreshTabContent()
+							}
+						case key.Matches(msg, keys.Right):
+							if m.activeTab < 6 {
+								m.activeTab++
+								m.actionIdx = 0
+								m.refreshTabContent()
+							}
+						}
+						// Only update viewport if list is focused
+						m.logViewport, cmd = m.logViewport.Update(msg)
+						cmds = append(cmds, cmd)
 					}
-				case key.Matches(msg, keys.Right):
-					if m.activeTab < 6 {
-						m.activeTab++
-						m.actionIdx = 0
-						m.refreshTabContent()
-					}
+
+				case focusContent:
+					m.contentViewport, cmd = m.contentViewport.Update(msg)
+					cmds = append(cmds, cmd)
 				}
-				m.logViewport, cmd = m.logViewport.Update(msg)
-				cmds = append(cmds, cmd)
-
-			case focusContent:
-				m.contentViewport, cmd = m.contentViewport.Update(msg)
-				cmds = append(cmds, cmd)
-			}
-
-			if key.Matches(msg, keys.Back) {
-				m.state = welcomeView
 			}
 
 		case dialogView:
@@ -656,17 +679,17 @@ func (m *Model) refreshTabContent() {
 		helpText := HeaderStyle.Render("ATLAS.GIT USAGE GUIDE") + "\n\n" +
 			SelectedStyle.Render("LAYOUT") + "\n" +
 			"• Sidebar (Left): Branches, tags, remotes.\n" +
-			"• Action Bar: Tab-specific commands (Fetch, Commit, etc.).\n" +
-			"• Top Pane: Active tab content.\n" +
-			"• Bottom Pane: Detailed diff of selection.\n\n" +
+			"• Main Pane (Top Right): Active tab content and Action Bar.\n" +
+			"• Bottom Pane (Bottom Right): Detailed diff view.\n\n" +
 			SelectedStyle.Render("NAVIGATION") + "\n" +
-			"• Tab / Shift+Tab: Cycle focus between areas.\n" +
-			"• Arrows / HJKL: Navigate lists.\n" +
-			"• Left / Right: Switch tabs (when Top Pane is focused).\n" +
-			"• Action Bar: Press UP from list to reach buttons, then Left/Right/Enter.\n\n" +
-			SelectedStyle.Render("STAGE TAB") + "\n" +
-			"• Enter: Stage/Unstage selected file.\n" +
-			"• Reach Action Bar (Up) -> Select COMMIT to finalize changes."
+			"• Tab / Shift+Tab: Cycle focus between bubbles (Pink border).\n" +
+			"• Enter: Enter the focused bubble (Green border).\n" +
+			"• Esc: Exit active bubble back to navigation mode.\n\n" +
+			SelectedStyle.Render("INSIDE MAIN PANE") + "\n" +
+			"• Left / Right: Switch between tabs (Log, Stage, etc.).\n" +
+			"• Arrows: Navigate lists or scroll content.\n" +
+			"• Up (from top): Reach the Action Bar buttons.\n" +
+			"• Enter: Stage/Unstage (Stage tab) or Execute Action."
 		m.logViewport.SetContent(helpText)
 	}
 }
@@ -805,7 +828,11 @@ func (m Model) renderMain() string {
 	// Sidebar
 	sbStyle := MainBoxStyle.Copy().Width(sidebarWidth).Height(contentHeight)
 	if m.focus == focusSidebar {
-		sbStyle = sbStyle.BorderForeground(Magenta)
+		if m.isEntered {
+			sbStyle = sbStyle.BorderForeground(Green)
+		} else {
+			sbStyle = sbStyle.BorderForeground(Pink)
+		}
 	}
 	sidebar := sbStyle.Render(m.sidebarList.View())
 
@@ -825,30 +852,44 @@ func (m Model) renderMain() string {
 	actionBar := ""
 	for i, a := range actionItems {
 		style := InactiveStyle.Copy().Padding(0, 1).Background(DarkGray)
-		if m.focus == focusActions && i == m.actionIdx {
+		if m.focus == focusMain && m.isEntered && m.subFocus == subAreaActions && i == m.actionIdx {
 			style = SelectedStyle.Copy().Padding(0, 1).Background(Magenta).Foreground(White)
 		}
 		actionBar += style.Render(a) + " "
 	}
 
-	// Log/Graph area
+	// Log/Graph area (Main Pane)
 	logStyle := MainBoxStyle.Copy().Width(mainWidth).Height(logHeight)
-	if m.focus == focusLog {
-		logStyle = logStyle.BorderForeground(Magenta)
+	if m.focus == focusMain {
+		if m.isEntered {
+			logStyle = logStyle.BorderForeground(Green)
+		} else {
+			logStyle = logStyle.BorderForeground(Pink)
+		}
 	}
 	
-	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabHeader, "\n", actionBar, "\n", m.logViewport.View()))
+	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, 
+		tabHeader, 
+		"", // spacer
+		actionBar, 
+		"", // spacer
+		m.logViewport.View(),
+	))
 
 	// Content/Diff area
 	contentStyle := MainBoxStyle.Copy().Width(mainWidth).Height(viewHeight)
 	if m.focus == focusContent {
-		contentStyle = contentStyle.BorderForeground(Magenta)
+		if m.isEntered {
+			contentStyle = contentStyle.BorderForeground(Green)
+		} else {
+			contentStyle = contentStyle.BorderForeground(Pink)
+		}
 	}
 	contentArea := contentStyle.Render(m.contentViewport.View())
 
-	mainView := lipgloss.JoinVertical(lipgloss.Left, logArea, contentArea)
+	mainViewUI := lipgloss.JoinVertical(lipgloss.Left, logArea, contentArea)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainView)
+	return lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainViewUI)
 }
 
 func (m Model) renderDialog() string {
