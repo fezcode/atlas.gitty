@@ -75,6 +75,7 @@ const (
 	dialogDeleteRemote
 	dialogUnlistRepo
 	dialogNukeRepo
+	dialogMerge
 )
 
 type keyMap struct {
@@ -125,6 +126,11 @@ func (k keyMap) FullHelp() [][]key.Binding {
 
 type item struct {
 	title, desc string
+}
+
+type repoDataUpdatedMsg struct {
+	status string
+	isErr  bool
 }
 
 func (i item) Title() string       { return i.title }
@@ -256,6 +262,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case repoDataUpdatedMsg:
+		m.setStatus(msg.status, msg.isErr)
+		m.refreshRepoData()
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -352,7 +363,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						case key.Matches(msg, keys.Left): if m.actionIdx > 0 { m.actionIdx-- }
 						case key.Matches(msg, keys.Right): if m.actionIdx < len(actions)-1 { m.actionIdx++ }
 						case key.Matches(msg, keys.Down): m.subFocus = subAreaList
-						case key.Matches(msg, keys.Enter): if len(actions) > 0 { m.executeAction(actions[m.actionIdx]) }
+						case key.Matches(msg, keys.Enter):
+							if len(actions) > 0 { return m, m.executeAction(actions[m.actionIdx]) }
 						}
 					} else {
 						switch {
@@ -453,7 +465,7 @@ func (m *Model) getActionsForTab() []string {
 	switch m.activeTab {
 	case tabGraph: return []string{"FETCH", "PULL", "PUSH", "CHERRY-PICK", "REFRESH"}
 	case tabStage: return []string{"COMMIT", "AMEND", "STAGE ALL", "UNSTAGE ALL", "REFRESH"}
-	case tabBranches: return []string{"NEW BRANCH", "DELETE BRANCH", "REFRESH"}
+	case tabBranches: return []string{"NEW BRANCH", "DELETE BRANCH", "MERGE", "REFRESH"}
 	case tabTags: return []string{"NEW TAG", "DELETE TAG", "PUSH TAGS", "REFRESH"}
 	case tabRemotes: return []string{"ADD REMOTE", "DELETE REMOTE", "REFRESH"}
 	case tabRepo: return []string{"OPEN IN EXPLORER", "UNLIST REPO", "NUKE REPO", "REFRESH"}
@@ -461,49 +473,59 @@ func (m *Model) getActionsForTab() []string {
 	}
 }
 
-func (m *Model) executeAction(action string) {
+func (m *Model) doStageAll() tea.Cmd {
+	return func() tea.Msg {
+		err := m.currentRepo.StageAll()
+		if err == nil { return repoDataUpdatedMsg{status: "All files staged.", isErr: false} }
+		return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true}
+	}
+}
+
+func (m *Model) doUnstageAll() tea.Cmd {
+	return func() tea.Msg {
+		err := m.currentRepo.UnstageAll()
+		if err == nil { return repoDataUpdatedMsg{status: "All files unstaged.", isErr: false} }
+		return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true}
+	}
+}
+
+func (m *Model) executeAction(action string) tea.Cmd {
 	switch action {
 	case "FETCH":
 		m.setStatus("Fetching...", false)
-		go func() {
+		return func() tea.Msg {
 			viaCli, err := m.currentRepo.Fetch()
-			if err != nil {
-				m.setStatus("Error: "+err.Error(), true)
-			} else if viaCli {
-				m.setStatus("Fetched (via CLI).", false)
-			} else {
-				m.setStatus("Fetched.", false)
-			}
-		}()
+			status := "Fetched."
+			if err != nil { return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true} }
+			if viaCli { status = "Fetched (via CLI)." }
+			return repoDataUpdatedMsg{status: status, isErr: false}
+		}
 	case "PULL":
 		m.setStatus("Pulling...", false)
-		viaCli, err := m.currentRepo.Pull()
-		if err != nil {
-			m.setStatus("Error: "+err.Error(), true)
-		} else {
-			msg := "Pulled."
-			if viaCli {
-				msg = "Pulled (via CLI)."
-			}
-			m.setStatus(msg, false)
-			m.refreshRepoData()
+		return func() tea.Msg {
+			viaCli, err := m.currentRepo.Pull()
+			status := "Pulled."
+			if err != nil { return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true} }
+			if viaCli { status = "Pulled (via CLI)." }
+			return repoDataUpdatedMsg{status: status, isErr: false}
 		}
 	case "PUSH":
 		m.setStatus("Pushing...", false)
-		viaCli, err := m.currentRepo.Push()
-		if err != nil {
-			m.setStatus("Error: "+err.Error(), true)
-		} else {
-			msg := "Pushed."
-			if viaCli {
-				msg = "Pushed (via CLI)."
-			}
-			m.setStatus(msg, false)
+		return func() tea.Msg {
+			viaCli, err := m.currentRepo.Push()
+			status := "Pushed."
+			if err != nil { return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true} }
+			if viaCli { status = "Pushed (via CLI)." }
+			return repoDataUpdatedMsg{status: status, isErr: false}
 		}
 	case "COMMIT": m.openDialog(dialogCommit, "Commit message...")
 	case "AMEND": m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
-	case "STAGE ALL": err := m.currentRepo.StageAll(); if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
-	case "UNSTAGE ALL": err := m.currentRepo.UnstageAll(); if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
+	case "STAGE ALL":
+		m.setStatus("Staging all files...", false)
+		return m.doStageAll()
+	case "UNSTAGE ALL":
+		m.setStatus("Unstaging all files...", false)
+		return m.doUnstageAll()
 	case "CHERRY-PICK":
 		if len(m.commits) > 0 {
 			hash := strings.Split(m.commits[m.commitIdx], " ")[0]
@@ -511,19 +533,17 @@ func (m *Model) executeAction(action string) {
 		}
 	case "NEW BRANCH": m.openDialog(dialogCreateBranch, "New branch name...")
 	case "DELETE BRANCH": if len(m.branchList) > 0 { branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* ")); m.openDialog(dialogDeleteBranch, "Type branch name to DELETE: "+branch) }
+	case "MERGE": if len(m.branchList) > 0 { branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* ")); m.openDialog(dialogMerge, "Merge '" + branch + "' into '" + m.currentBranch + "'? (Type YES to confirm)") }
 	case "NEW TAG": m.openDialog(dialogCreateTag, "New tag name...")
 	case "DELETE TAG": if len(m.tagList) > 0 { tag := m.tagList[m.tagIdx]; m.openDialog(dialogDeleteTag, "Type tag name to DELETE: "+tag) }
 	case "PUSH TAGS":
 		m.setStatus("Pushing tags...", false)
-		viaCli, err := m.currentRepo.PushTags()
-		if err != nil {
-			m.setStatus("Error: "+err.Error(), true)
-		} else {
-			msg := "Tags pushed."
-			if viaCli {
-				msg = "Tags pushed (via CLI)."
-			}
-			m.setStatus(msg, false)
+		return func() tea.Msg {
+			viaCli, err := m.currentRepo.PushTags()
+			status := "Tags pushed."
+			if err != nil { return repoDataUpdatedMsg{status: "Error: " + err.Error(), isErr: true} }
+			if viaCli { status = "Tags pushed (via CLI)." }
+			return repoDataUpdatedMsg{status: status, isErr: false}
 		}
 	case "ADD REMOTE": m.openMultiDialog(dialogAddRemote, "Remote Name (e.g. origin)", "Remote URL")
 	case "DELETE REMOTE": if len(m.remoteList) > 0 { name := strings.Split(m.remoteList[m.remoteIdx], " ")[0]; m.openDialog(dialogDeleteRemote, "Type remote name to DELETE: "+name) }
@@ -532,6 +552,7 @@ func (m *Model) executeAction(action string) {
 	case "NUKE REPO": m.openDialog(dialogNukeRepo, "Type 'YES' to DELETE repo from DISK forever!")
 	case "REFRESH": m.refreshRepoData(); m.setStatus("Refreshed.", false)
 	}
+	return nil
 }
 
 func openExplorer(path string) {
@@ -592,6 +613,12 @@ func (m *Model) handleDialogSubmit() {
 	case dialogDeleteTag: err = m.currentRepo.DeleteTag(v1); if err == nil { m.setStatus("Tag deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
 	case dialogAddRemote: err = m.currentRepo.CreateRemote(v1, v2); if err == nil { m.setStatus("Remote added: "+v1, false) } else { m.setStatus("Add failed: "+err.Error(), true) }
 	case dialogDeleteRemote: err = m.currentRepo.DeleteRemote(v1); if err == nil { m.setStatus("Remote deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
+	case dialogMerge:
+		if strings.ToUpper(v1) == "YES" {
+			branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* "))
+			err = m.currentRepo.Merge(branch)
+			if err == nil { m.setStatus("Merged '"+branch+"' into '"+m.currentBranch+"'.", false) } else { m.setStatus("Merge failed: "+err.Error(), true) }
+		}
 	case dialogUnlistRepo:
 		if strings.ToUpper(v1) == "YES" {
 			m.cfg.RemoveRepository(m.currentRepo.Path); _ = m.cfg.Save(); m.updateRepoList()

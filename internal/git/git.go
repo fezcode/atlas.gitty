@@ -174,24 +174,29 @@ func (g *GitRepo) UnstageFile(path string) error {
 }
 
 func (g *GitRepo) StageAll() error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "add", ".")
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		return fmt.Errorf("git add . failed: %v (output: %s)", err, string(out))
 	}
-	_, err = w.Add(".")
-	return err
+	return nil
 }
 
 func (g *GitRepo) UnstageAll() error {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "reset", "HEAD", ".")
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return err
+		// If it's a new repo with no commits, 'git reset' might fail. Try simple 'reset'
+		cmd = exec.Command("git", "reset", ".")
+		cmd.Dir = g.Path
+		_, err = cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("git reset failed: %v (output: %s)", err, string(out))
+		}
 	}
-	head, err := g.Repo.Head()
-	if err != nil {
-		return w.Reset(&git.ResetOptions{Files: []string{"."}})
-	}
-	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{"."}})
+	return nil
 }
 
 func (g *GitRepo) Fetch() (bool, error) {
@@ -309,6 +314,16 @@ func (g *GitRepo) CherryPick(hash string) error {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("failed to cherry-pick: %v (output: %s)", err, string(out))
+	}
+	return nil
+}
+
+func (g *GitRepo) Merge(branch string) error {
+	cmd := exec.Command("git", "merge", branch)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to merge: %v (output: %s)", err, string(out))
 	}
 	return nil
 }
