@@ -76,9 +76,11 @@ type keyMap struct {
 	Back    key.Binding
 	Quit    key.Binding
 	Help    key.Binding
-	Tab     key.Binding
+	Tab      key.Binding
 	ShiftTab key.Binding
-	Delete  key.Binding
+	Delete   key.Binding
+	PrevTab  key.Binding
+	NextTab  key.Binding
 }
 
 var keys = keyMap{
@@ -93,17 +95,19 @@ var keys = keyMap{
 	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next focus")),
 	ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev focus")),
 	Delete:  key.NewBinding(key.WithKeys("x", "delete"), key.WithHelp("x", "delete")),
+	PrevTab: key.NewBinding(key.WithKeys("["), key.WithHelp("[", "prev tab")),
+	NextTab: key.NewBinding(key.WithKeys("]"), key.WithHelp("]", "next tab")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Tab, k.Enter, k.Back, k.Quit}
+	return []key.Binding{k.Tab, k.PrevTab, k.NextTab, k.Enter, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Tab, k.ShiftTab, k.Enter, k.Back},
-		{k.Quit},
+		{k.Tab, k.ShiftTab, k.PrevTab, k.NextTab},
+		{k.Enter, k.Back, k.Quit},
 	}
 }
 
