@@ -43,6 +43,7 @@ const (
 	tabTags
 	tabRemotes
 	tabDiff
+	tabHelp
 )
 
 type dialogType int
@@ -85,8 +86,8 @@ type keyMap struct {
 var keys = keyMap{
 	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
-	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
+	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left tab")),
+	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right tab")),
 	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
 	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
@@ -286,6 +287,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case mainView:
+			// Global MainView Keys
 			if key.Matches(msg, keys.Tab) {
 				m.focus = (m.focus + 1) % 3
 				return m, nil
@@ -293,6 +295,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if key.Matches(msg, keys.ShiftTab) {
 				m.focus = (m.focus + 2) % 3
 				return m, nil
+			}
+			if key.Matches(msg, keys.Refresh) {
+				m.refreshRepoData()
+				m.setStatus("Refreshed.", false)
+				return m, nil
+			}
+			if key.Matches(msg, keys.Fetch) {
+				m.setStatus("Fetching...", false)
+				go func() { _ = m.currentRepo.Fetch() }()
+				return m, nil
+			}
+			if key.Matches(msg, keys.Pull) {
+				m.setStatus("Pulling...", false)
+				err := m.currentRepo.Pull()
+				if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pulled.", false); m.refreshRepoData() }
+				return m, nil
+			}
+			if key.Matches(msg, keys.Push) {
+				m.setStatus("Pushing...", false)
+				err := m.currentRepo.Push()
+				if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
+				return m, nil
+			}
+			if key.Matches(msg, keys.Commit) {
+				m.openDialog(dialogCommit, "Commit message...")
+				return m, nil
+			}
+			if key.Matches(msg, keys.Amend) {
+				m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
+				return m, nil
+			}
+			if key.Matches(msg, keys.Checkout) {
+				m.openDialog(dialogCheckout, "Branch name to switch to...")
+				return m, nil
+			}
+			if key.Matches(msg, keys.CherryPick) {
+				if len(m.commits) > 0 {
+					hash := strings.Split(m.commits[m.commitIdx], " ")[0]
+					m.openDialog(dialogCherryPick, "Cherry-pick " + hash + "? (enter to confirm)")
+					m.textInput.SetValue(hash)
+					return m, nil
+				}
 			}
 
 			switch m.focus {
@@ -330,37 +374,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.commitIdx++
 						m.updateDiffFromCommit()
 					}
-				case key.Matches(msg, keys.Refresh):
-					m.refreshRepoData()
-					m.setStatus("Refreshed.", false)
-				case key.Matches(msg, keys.Fetch):
-					m.setStatus("Fetching...", false)
-					go func() { _ = m.currentRepo.Fetch() }()
-				case key.Matches(msg, keys.Pull):
-					m.setStatus("Pulling...", false)
-					err := m.currentRepo.Pull()
-					if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pulled.", false); m.refreshRepoData() }
-				case key.Matches(msg, keys.Push):
-					m.setStatus("Pushing...", false)
-					err := m.currentRepo.Push()
-					if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
-				case key.Matches(msg, keys.Commit):
-					m.openDialog(dialogCommit, "Commit message...")
-				case key.Matches(msg, keys.Amend):
-					m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
-				case key.Matches(msg, keys.CherryPick):
-					if len(m.commits) > 0 {
-						hash := strings.Split(m.commits[m.commitIdx], " ")[0]
-						m.openDialog(dialogCherryPick, "Cherry-pick " + hash + "? (enter to confirm)")
-						m.textInput.SetValue(hash)
-					}
-				case key.Matches(msg, keys.Checkout):
-					m.openDialog(dialogCheckout, "Branch name to switch to...")
 				case key.Matches(msg, keys.Left):
-					m.activeTab = (m.activeTab + 5) % 6
+					m.activeTab = (m.activeTab + 6) % 7
 					m.refreshTabContent()
 				case key.Matches(msg, keys.Right):
-					m.activeTab = (m.activeTab + 1) % 6
+					m.activeTab = (m.activeTab + 1) % 7
 					m.refreshTabContent()
 				}
 				m.logViewport, cmd = m.logViewport.Update(msg)
@@ -558,17 +576,38 @@ func (m *Model) refreshTabContent() {
 		m.logViewport.SetContent(s)
 	case tabBranches:
 		b, _ := m.currentRepo.GetBranches()
-		m.logViewport.SetContent(strings.Join(b, "\n"))
+		m.logViewport.SetContent(HeaderStyle.Render("BRANCHES") + "\n\n" + strings.Join(b, "\n"))
 	case tabTags:
 		t, _ := m.currentRepo.GetTags()
-		m.logViewport.SetContent(strings.Join(t, "\n"))
+		m.logViewport.SetContent(HeaderStyle.Render("TAGS") + "\n\n" + strings.Join(t, "\n"))
 	case tabRemotes:
 		r, _ := m.currentRepo.GetRemotes()
-		m.logViewport.SetContent(strings.Join(r, "\n"))
+		m.logViewport.SetContent(HeaderStyle.Render("REMOTES") + "\n\n" + strings.Join(r, "\n"))
 	case tabDiff:
-		// Show current worktree diff
 		d, _ := m.currentRepo.GetDiff("")
 		m.logViewport.SetContent(d)
+	case tabHelp:
+		helpText := HeaderStyle.Render("ATLAS.GIT USAGE GUIDE") + "\n\n" +
+			SelectedStyle.Render("LAYOUT") + "\n" +
+			"• Sidebar (Left): Shows branches, tags, and remotes.\n" +
+			"• Top Pane (Right): Active tab content (Graph, Status, etc.).\n" +
+			"• Bottom Pane (Right): Detailed diff of the selected commit.\n\n" +
+			SelectedStyle.Render("NAVIGATION") + "\n" +
+			"• Tab / Shift+Tab: Cycle focus between panes.\n" +
+			"• Arrows / HJKL: Navigate lists and viewports.\n" +
+			"• Left / Right: Switch between tabs (when Top Pane is focused).\n\n" +
+			SelectedStyle.Render("GIT COMMANDS (GLOBAL)") + "\n" +
+			"• f: Fetch from origin\n" +
+			"• p: Pull from origin\n" +
+			"• P: Push to origin\n" +
+			"• c: Commit staged changes\n" +
+			"• a: Amend last commit\n" +
+			"• v: Cherry-pick selected commit\n" +
+			"• S: Switch branch (manual input)\n" +
+			"• r: Refresh repository data\n\n" +
+			SelectedStyle.Render("SIDEBAR INTERACTION") + "\n" +
+			"• Enter: Checkout selected branch from the sidebar list."
+		m.logViewport.SetContent(helpText)
 	}
 }
 
@@ -672,7 +711,7 @@ func (m Model) renderMain() string {
 	sidebar := sbStyle.Render(m.sidebarList.View())
 
 	// Tabs
-	tabs := []string{"LOG", "STATUS", "BRANCHES", "TAGS", "REMOTES", "DIFF"}
+	tabs := []string{"LOG", "STATUS", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP"}
 	tabHeader := ""
 	for i, t := range tabs {
 		style := InactiveStyle.Copy().Padding(0, 1)
