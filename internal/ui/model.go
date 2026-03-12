@@ -184,6 +184,7 @@ type Model struct {
 	showHelp bool
 	lastMsg string
 	isError bool
+	cwd     string
 }
 
 func NewInitialModel() Model {
@@ -192,6 +193,8 @@ func NewInitialModel() Model {
 		cfg = &config.Config{}
 	}
 	
+	dir, _ := os.Getwd()
+
 	items := []list.Item{}
 	for _, r := range cfg.Repositories {
 		items = append(items, item{title: filepath.Base(r.Path), desc: r.Path})
@@ -238,6 +241,7 @@ func NewInitialModel() Model {
 		textInput2:  ti2,
 		help:        h,
 		focus:       focusMain,
+		cwd:         dir,
 	}
 }
 
@@ -675,7 +679,19 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderFooter() string {
 	var msg string; if m.lastMsg != "" { style := SuccessMessageStyle; if m.isError { style = ErrorMessageStyle }; msg = style.Render(m.lastMsg) }
-	helpStr := m.help.View(keys); gap := m.width - lipgloss.Width(msg) - lipgloss.Width(helpStr) - 2; if gap < 0 { gap = 0 }; spacer := strings.Repeat(" ", gap); return FooterBoxStyle.Width(m.width).Render(lipgloss.JoinHorizontal(lipgloss.Top, msg, spacer, helpStr))
+	helpStr := m.help.View(keys)
+	
+	// CWD display on the left
+	cwdStyle := lipgloss.NewStyle().Foreground(Blue).Italic(true).Padding(0, 1)
+	cwdStr := cwdStyle.Render("Run from: " + m.cwd)
+	
+	gap := m.width - lipgloss.Width(cwdStr) - lipgloss.Width(msg) - lipgloss.Width(helpStr) - 2
+	if gap < 0 { gap = 0 }
+	spacer := strings.Repeat(" ", gap)
+	
+	return FooterBoxStyle.Width(m.width).Render(
+		lipgloss.JoinHorizontal(lipgloss.Top, cwdStr, msg, spacer, helpStr),
+	)
 }
 
 func (m Model) renderWelcome() string {
