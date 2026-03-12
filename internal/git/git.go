@@ -179,20 +179,87 @@ func (g *GitRepo) UnstageAll() error {
 	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{"."}})
 }
 
-func (g *GitRepo) Fetch() error {
-	return g.Repo.Fetch(&git.FetchOptions{RemoteName: "origin"})
+func (g *GitRepo) Fetch() (bool, error) {
+	err := g.Repo.Fetch(&git.FetchOptions{RemoteName: "origin"})
+	if err == nil {
+		return false, nil
+	}
+	if err == git.NoErrAlreadyUpToDate {
+		return false, nil
+	}
+
+	// Fallback to CLI
+	cmd := exec.Command("git", "fetch", "origin")
+	cmd.Dir = g.Path
+	out, cliErr := cmd.CombinedOutput()
+	if cliErr != nil {
+		return false, fmt.Errorf("git fetch failed: %v (output: %s)", cliErr, string(out))
+	}
+	return true, nil
 }
 
-func (g *GitRepo) Pull() error {
+func (g *GitRepo) Pull() (bool, error) {
 	w, err := g.Repo.Worktree()
 	if err != nil {
-		return err
+		return false, err
 	}
-	return w.Pull(&git.PullOptions{RemoteName: "origin"})
+	err = w.Pull(&git.PullOptions{RemoteName: "origin"})
+	if err == nil {
+		return false, nil
+	}
+	if err == git.NoErrAlreadyUpToDate {
+		return false, nil
+	}
+
+	// Fallback to CLI
+	cmd := exec.Command("git", "pull", "origin")
+	cmd.Dir = g.Path
+	out, cliErr := cmd.CombinedOutput()
+	if cliErr != nil {
+		return false, fmt.Errorf("git pull failed: %v (output: %s)", cliErr, string(out))
+	}
+	return true, nil
 }
 
-func (g *GitRepo) Push() error {
-	return g.Repo.Push(&git.PushOptions{RemoteName: "origin"})
+func (g *GitRepo) Push() (bool, error) {
+	err := g.Repo.Push(&git.PushOptions{RemoteName: "origin"})
+	if err == nil {
+		return false, nil
+	}
+	if err == git.NoErrAlreadyUpToDate {
+		return false, nil
+	}
+
+	// Fallback to CLI
+	cmd := exec.Command("git", "push", "origin")
+	cmd.Dir = g.Path
+	out, cliErr := cmd.CombinedOutput()
+	if cliErr != nil {
+		return false, fmt.Errorf("git push failed: %v (output: %s)", cliErr, string(out))
+	}
+	return true, nil
+}
+
+func (g *GitRepo) PushTags() (bool, error) {
+	err := g.Repo.Push(&git.PushOptions{
+		RemoteName: "origin",
+		RefSpecs:   []gitconfig.RefSpec{"+refs/tags/*:refs/tags/*"},
+	})
+	if err == nil {
+		return false, nil
+	}
+	if err == git.NoErrAlreadyUpToDate {
+		return false, nil
+	}
+
+	// Fallback to CLI
+	cmd := exec.Command("git", "push", "origin", "--tags")
+	cmd.Dir = g.Path
+	out, cliErr := cmd.CombinedOutput()
+	if cliErr != nil {
+		return false, fmt.Errorf("git push tags failed: %v (output: %s)", cliErr, string(out))
+	}
+	return true, nil
 }
 
 func (g *GitRepo) CreateRemote(name, url string) error {
@@ -205,13 +272,6 @@ func (g *GitRepo) CreateRemote(name, url string) error {
 
 func (g *GitRepo) DeleteRemote(name string) error {
 	return g.Repo.DeleteRemote(name)
-}
-
-func (g *GitRepo) PushTags() error {
-	return g.Repo.Push(&git.PushOptions{
-		RemoteName: "origin",
-		RefSpecs:   []gitconfig.RefSpec{"+refs/tags/*:refs/tags/*"},
-	})
 }
 
 func (g *GitRepo) Amend(message string) error {
@@ -351,12 +411,22 @@ func (g *GitRepo) GetCommits(limit int) ([]string, error) {
 	return commits, err
 }
 
-func CloneRepo(url, path string) error {
+func CloneRepo(url, path string) (bool, error) {
 	_, err := git.PlainClone(path, false, &git.CloneOptions{
 		URL:      url,
 		Progress: os.Stdout,
 	})
-	return err
+	if err == nil {
+		return false, nil
+	}
+
+	// Fallback to CLI
+	cmd := exec.Command("git", "clone", url, path)
+	out, cliErr := cmd.CombinedOutput()
+	if cliErr != nil {
+		return false, fmt.Errorf("git clone failed: %v (output: %s)", cliErr, string(out))
+	}
+	return true, nil
 }
 
 func InitRepo(path string) error {

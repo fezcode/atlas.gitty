@@ -455,9 +455,43 @@ func (m *Model) getActionsForTab() []string {
 
 func (m *Model) executeAction(action string) {
 	switch action {
-	case "FETCH": m.setStatus("Fetching...", false); go func() { _ = m.currentRepo.Fetch() }()
-	case "PULL": m.setStatus("Pulling...", false); err := m.currentRepo.Pull(); if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pulled.", false); m.refreshRepoData() }
-	case "PUSH": m.setStatus("Pushing...", false); err := m.currentRepo.Push(); if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
+	case "FETCH":
+		m.setStatus("Fetching...", false)
+		go func() {
+			viaCli, err := m.currentRepo.Fetch()
+			if err != nil {
+				m.setStatus("Error: "+err.Error(), true)
+			} else if viaCli {
+				m.setStatus("Fetched (via CLI).", false)
+			} else {
+				m.setStatus("Fetched.", false)
+			}
+		}()
+	case "PULL":
+		m.setStatus("Pulling...", false)
+		viaCli, err := m.currentRepo.Pull()
+		if err != nil {
+			m.setStatus("Error: "+err.Error(), true)
+		} else {
+			msg := "Pulled."
+			if viaCli {
+				msg = "Pulled (via CLI)."
+			}
+			m.setStatus(msg, false)
+			m.refreshRepoData()
+		}
+	case "PUSH":
+		m.setStatus("Pushing...", false)
+		viaCli, err := m.currentRepo.Push()
+		if err != nil {
+			m.setStatus("Error: "+err.Error(), true)
+		} else {
+			msg := "Pushed."
+			if viaCli {
+				msg = "Pushed (via CLI)."
+			}
+			m.setStatus(msg, false)
+		}
 	case "COMMIT": m.openDialog(dialogCommit, "Commit message...")
 	case "AMEND": m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
 	case "STAGE ALL": err := m.currentRepo.StageAll(); if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
@@ -471,7 +505,18 @@ func (m *Model) executeAction(action string) {
 	case "DELETE BRANCH": if len(m.branchList) > 0 { branch := strings.TrimSpace(strings.TrimPrefix(m.branchList[m.branchIdx], "* ")); m.openDialog(dialogDeleteBranch, "Type branch name to DELETE: "+branch) }
 	case "NEW TAG": m.openDialog(dialogCreateTag, "New tag name...")
 	case "DELETE TAG": if len(m.tagList) > 0 { tag := m.tagList[m.tagIdx]; m.openDialog(dialogDeleteTag, "Type tag name to DELETE: "+tag) }
-	case "PUSH TAGS": m.setStatus("Pushing tags...", false); err := m.currentRepo.PushTags(); if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Tags pushed.", false) }
+	case "PUSH TAGS":
+		m.setStatus("Pushing tags...", false)
+		viaCli, err := m.currentRepo.PushTags()
+		if err != nil {
+			m.setStatus("Error: "+err.Error(), true)
+		} else {
+			msg := "Tags pushed."
+			if viaCli {
+				msg = "Tags pushed (via CLI)."
+			}
+			m.setStatus(msg, false)
+		}
 	case "ADD REMOTE": m.openMultiDialog(dialogAddRemote, "Remote Name (e.g. origin)", "Remote URL")
 	case "DELETE REMOTE": if len(m.remoteList) > 0 { name := strings.Split(m.remoteList[m.remoteIdx], " ")[0]; m.openDialog(dialogDeleteRemote, "Type remote name to DELETE: "+name) }
 	case "OPEN IN EXPLORER": openExplorer(m.currentRepo.Path)
@@ -512,10 +557,13 @@ func (m *Model) handleDialogSubmit() {
 		dest := v2
 		if !filepath.IsAbs(dest) { cwd, _ := filepath.Abs("."); dest = filepath.Join(cwd, v2) }
 		absDest, _ := filepath.Abs(dest)
-		m.setStatus("Cloning to "+absDest+"...", false); err = git.CloneRepo(v1, absDest)
+		m.setStatus("Cloning to "+absDest+"...", false)
+		viaCli, err := git.CloneRepo(v1, absDest)
 		if err == nil {
 			m.cfg.AddRepository(absDest); _ = m.cfg.Save(); m.updateRepoList()
-			m.setStatus("Cloned to "+absDest, false)
+			msg := "Cloned to "+absDest
+			if viaCli { msg = "Cloned (via CLI) to "+absDest }
+			m.setStatus(msg, false)
 		} else { m.setStatus("Clone failed: "+err.Error(), true) }
 		m.state = welcomeView; return
 	case dialogInitRepo:
@@ -638,6 +686,10 @@ func (m *Model) refreshTabContent() {
 			"• Main Pane (Active): Use Arrows to scroll lists. Press UP from top to reach Action Bar.\n" +
 			"• Sidebar (Active): Use Arrows to select, Enter to checkout branch.\n" +
 			"• Action Bar: Use Left/Right to select a button, Enter to execute.\n\n" +
+			SelectedStyle.Render("AUTHENTICATION & FALLBACK") + "\n" +
+			"• PUSH/PULL/FETCH operations first attempt using internal library.\n" +
+			"• If authentication fails (e.g. SSH/HTTPS creds), it falls back to system 'git' CLI.\n" +
+			"• This allows leveraging your system's Git credential helpers automatically.\n\n" +
 			SelectedStyle.Render("TABS") + "\n" +
 			"• LOG: Browse commits. Enter on commit to see diff below.\n" +
 			"• STAGE: Enter on file to toggle Stage/Unstage. Top Action Bar has COMMIT.\n" +
