@@ -53,5 +53,3 @@ require (
 	golang.org/x/text v0.31.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 )
-
-replace github.com/fezcode/go-piml => ../go-piml
