@@ -139,6 +139,7 @@ type Model struct {
 	commits       []string
 	commitIdx     int
 	currentBranch string
+	graphLines    []string
 	
 	// Stage view
 	statusItems []git.StatusItem
@@ -358,44 +359,52 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							
 							switch m.activeTab {
 							case tabGraph:
-								if m.commitIdx > 0 { m.commitIdx--; m.updateDiffFromCommit() }
+								if m.commitIdx > 0 { m.commitIdx--; m.refreshTabContent(); m.updateDiffFromCommit() }
 							case tabStage:
-								if m.statusIdx > 0 { m.statusIdx--; m.updateDiffFromStatus() }
+								if m.statusIdx > 0 { m.statusIdx--; m.refreshTabContent(); m.updateDiffFromStatus() }
 							}
 						case key.Matches(msg, keys.Down):
 							switch m.activeTab {
 							case tabGraph:
-								if m.commitIdx < len(m.commits)-1 { m.commitIdx++; m.updateDiffFromCommit() }
+								if m.commitIdx < len(m.graphLines)-1 { m.commitIdx++; m.refreshTabContent(); m.updateDiffFromCommit() }
 							case tabStage:
-								if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.updateDiffFromStatus() }
+								if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.refreshTabContent(); m.updateDiffFromStatus() }
 							}
 						case key.Matches(msg, keys.Enter):
-							if m.activeTab == tabStage && len(m.statusItems) > 0 {
-								item := m.statusItems[m.statusIdx]
-								var err error
-								if item.Staged {
-									err = m.currentRepo.UnstageFile(item.Path)
-								} else {
-									err = m.currentRepo.StageFile(item.Path)
+							switch m.activeTab {
+							case tabStage:
+								if len(m.statusItems) > 0 {
+									item := m.statusItems[m.statusIdx]
+									var err error
+									if item.Staged { err = m.currentRepo.UnstageFile(item.Path) } else { err = m.currentRepo.StageFile(item.Path) }
+									if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
 								}
-								if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
+							case tabGraph:
+								m.updateDiffFromCommit()
 							}
 						case key.Matches(msg, keys.Left):
 							if m.activeTab > 0 {
 								m.activeTab--
 								m.actionIdx = 0
+								m.commitIdx = 0
+								m.statusIdx = 0
 								m.refreshTabContent()
 							}
 						case key.Matches(msg, keys.Right):
 							if m.activeTab < 6 {
 								m.activeTab++
 								m.actionIdx = 0
+								m.commitIdx = 0
+								m.statusIdx = 0
 								m.refreshTabContent()
 							}
 						}
-						// Only update viewport if list is focused
-						m.logViewport, cmd = m.logViewport.Update(msg)
-						cmds = append(cmds, cmd)
+						
+						// Viewport updates only for relevant tabs and NOT for keys we handled
+						if m.activeTab != tabGraph && m.activeTab != tabStage {
+							m.logViewport, cmd = m.logViewport.Update(msg)
+							cmds = append(cmds, cmd)
+						}
 					}
 
 				case focusContent:
@@ -500,7 +509,6 @@ func (m *Model) updateSizes() {
 	
 	m.sidebarList.SetSize(sidebarWidth-2, contentHeight-2)
 	
-	// -1 tabHeader, -1 spacer, -1 actionBar, -1 spacer, -2 borders = -6
 	m.logViewport.Width = mainWidth - 4
 	m.logViewport.Height = logHeight - 6 
 	if m.logViewport.Height < 1 { m.logViewport.Height = 1 }
@@ -627,6 +635,9 @@ func (m *Model) refreshRepoData() {
 	m.commits, _ = m.currentRepo.GetCommits(100)
 	m.statusItems, _ = m.currentRepo.GetStatusItems()
 	
+	g, _ := m.currentRepo.GetGraph(100)
+	m.graphLines = strings.Split(strings.TrimSpace(g), "\n")
+	
 	// Sidebar items
 	var items []list.Item
 	branches, _ := m.currentRepo.GetBranches()
@@ -659,8 +670,7 @@ func (m *Model) refreshTabContent() {
 	
 	switch m.activeTab {
 	case tabGraph:
-		g, _ := m.currentRepo.GetGraph(100)
-		m.logViewport.SetContent(g)
+		m.renderGraphView()
 	case tabStage:
 		m.renderStageView()
 	case tabBranches:
@@ -689,8 +699,27 @@ func (m *Model) refreshTabContent() {
 			"• Left / Right: Switch between tabs (Log, Stage, etc.).\n" +
 			"• Arrows: Navigate lists or scroll content.\n" +
 			"• Up (from top): Reach the Action Bar buttons.\n" +
-			"• Enter: Stage/Unstage (Stage tab) or Execute Action."
+			"• Enter: Stage/Unstage (Stage tab) or Select Commit (Log tab)."
 		m.logViewport.SetContent(helpText)
+	}
+}
+
+func (m *Model) renderGraphView() {
+	var sb strings.Builder
+	for i, line := range m.graphLines {
+		if i == m.commitIdx {
+			sb.WriteString(SelectedStyle.Render("> " + line) + "\n")
+		} else {
+			sb.WriteString("  " + line + "\n")
+		}
+	}
+	m.logViewport.SetContent(sb.String())
+	
+	// Sync viewport scroll
+	if m.commitIdx < m.logViewport.YOffset {
+		m.logViewport.YOffset = m.commitIdx
+	} else if m.commitIdx >= m.logViewport.YOffset+m.logViewport.Height {
+		m.logViewport.YOffset = m.commitIdx - m.logViewport.Height + 1
 	}
 }
 
@@ -718,14 +747,32 @@ func (m *Model) renderStageView() {
 		}
 	}
 	m.logViewport.SetContent(sb.String())
+	
+	// Sync viewport scroll
+	if m.statusIdx < m.logViewport.YOffset {
+		m.logViewport.YOffset = m.statusIdx
+	} else if m.statusIdx >= m.logViewport.YOffset+m.logViewport.Height {
+		m.logViewport.YOffset = m.statusIdx - m.logViewport.Height + 1
+	}
 }
 
 func (m *Model) updateDiffFromCommit() {
 	if len(m.commits) > 0 && m.commitIdx < len(m.commits) {
-		hash := strings.Split(m.commits[m.commitIdx], " ")[0]
-		diff, err := m.currentRepo.GetCommitDiff(hash)
-		if err == nil {
-			m.contentViewport.SetContent(diff)
+		// Attempt to extract hash from either m.commits or m.graphLines
+		// graphLines often starts with * hash msg
+		line := ""
+		if m.commitIdx < len(m.commits) {
+			line = m.commits[m.commitIdx]
+		}
+		
+		parts := strings.Split(strings.TrimSpace(line), " ")
+		if len(parts) > 0 {
+			hash := parts[0]
+			diff, err := m.currentRepo.GetCommitDiff(hash)
+			if err == nil {
+				m.contentViewport.SetContent(diff)
+				m.contentViewport.GotoTop()
+			}
 		}
 	}
 }
@@ -737,6 +784,7 @@ func (m *Model) updateDiffFromStatus() {
 		if err == nil {
 			if diff == "" { diff = "No changes or binary file." }
 			m.contentViewport.SetContent(diff)
+			m.contentViewport.GotoTop()
 		}
 	} else {
 		m.contentViewport.SetContent("")
