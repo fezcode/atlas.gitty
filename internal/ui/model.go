@@ -680,16 +680,22 @@ func (m *Model) updateDiffFromCommit() {
 		parts := strings.Split(strings.TrimSpace(m.commits[m.commitIdx]), " ")
 		if len(parts) > 0 {
 			diff, err := m.currentRepo.GetCommitDiff(parts[0])
-			if err == nil { m.contentViewport.SetContent(diff); m.contentViewport.GotoTop() }
+			if err == nil { m.contentViewport.SetContent(diff); m.contentViewport.GotoTop(); return }
 		}
 	}
+	m.contentViewport.SetContent("")
 }
 
 func (m *Model) updateDiffFromStatus() {
 	if len(m.statusItems) > 0 && m.statusIdx < len(m.statusItems) {
 		diff, err := m.currentRepo.GetDiff(m.statusItems[m.statusIdx].Path)
-		if err == nil { if diff == "" { diff = "No changes or binary file." }; m.contentViewport.SetContent(diff); m.contentViewport.GotoTop() }
-	} else { m.contentViewport.SetContent("") }
+		if err == nil {
+			if diff == "" { diff = "No changes or binary file." }
+			m.contentViewport.SetContent(diff); m.contentViewport.GotoTop()
+			return
+		}
+	}
+	m.contentViewport.SetContent("")
 }
 
 func (m Model) View() string {
