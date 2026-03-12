@@ -493,12 +493,13 @@ func (m *Model) handleDialogSubmit() {
 func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
 	
-	sidebarWidth := 30
-	mainWidth := m.width - sidebarWidth - 2 // Conservative width
+	sidebarWidth := 26
+	mainWidth := m.width - sidebarWidth - 4
+	if mainWidth < 10 { mainWidth = 10 }
 	
 	headerHeight := 2
 	footerHeight := 2
-	contentHeight := m.height - headerHeight - footerHeight
+	contentHeight := m.height - headerHeight - footerHeight - 4 // Reduced even further
 	
 	if contentHeight < 10 { contentHeight = 10 }
 	
@@ -508,7 +509,7 @@ func (m *Model) updateSizes() {
 	m.sidebarList.SetSize(sidebarWidth-4, contentHeight-2)
 	
 	m.logViewport.Width = mainWidth - 4
-	m.logViewport.Height = logHeight - 4 // Reduced overhead
+	m.logViewport.Height = logHeight - 4
 	if m.logViewport.Height < 1 { m.logViewport.Height = 1 }
 	
 	m.contentViewport.Width = mainWidth - 4
@@ -658,7 +659,7 @@ func (m Model) renderWelcome() string {
 func (m Model) renderRepoSelect() string { box := MainBoxStyle.Copy().Width(m.width - 4).Height(m.height - 8).Render(m.repoList.View()); return lipgloss.Place(m.width, m.height-6, lipgloss.Center, lipgloss.Center, box) }
 
 func (m Model) renderMain() string {
-	sidebarWidth := 30; mainWidth := m.width - sidebarWidth - 2; headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight
+	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 4; headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 4
 	if contentHeight < 10 { contentHeight = 10 }; logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
 	sbStyle := MainBoxStyle.Copy().Width(sidebarWidth).Height(contentHeight); if m.focus == focusSidebar { if m.isEntered { sbStyle = sbStyle.BorderForeground(Green) } else { sbStyle = sbStyle.BorderForeground(Pink) } }
 	sidebar := sbStyle.Render(m.sidebarList.View()); tabs := []string{"LOG", "STAGE", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP"}
