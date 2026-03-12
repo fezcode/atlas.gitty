@@ -289,6 +289,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case mainView:
+			if key.Matches(msg, keys.PrevTab) {
+				m.activeTab = (m.activeTab + 6) % 7
+				m.actionIdx = 0
+				m.commitIdx = 0
+				m.statusIdx = 0
+				m.refreshTabContent()
+				return m, nil
+			}
+			if key.Matches(msg, keys.NextTab) {
+				m.activeTab = (m.activeTab + 1) % 7
+				m.actionIdx = 0
+				m.commitIdx = 0
+				m.statusIdx = 0
+				m.refreshTabContent()
+				return m, nil
+			}
+
 			if !m.isEntered {
 				// NAVIGATION MODE
 				if key.Matches(msg, keys.Tab) {
