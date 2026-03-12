@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	gitconfig "github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
@@ -192,6 +193,25 @@ func (g *GitRepo) Pull() error {
 
 func (g *GitRepo) Push() error {
 	return g.Repo.Push(&git.PushOptions{RemoteName: "origin"})
+}
+
+func (g *GitRepo) CreateRemote(name, url string) error {
+	_, err := g.Repo.CreateRemote(&gitconfig.RemoteConfig{
+		Name: name,
+		URLs: []string{url},
+	})
+	return err
+}
+
+func (g *GitRepo) DeleteRemote(name string) error {
+	return g.Repo.DeleteRemote(name)
+}
+
+func (g *GitRepo) PushTags() error {
+	return g.Repo.Push(&git.PushOptions{
+		RemoteName: "origin",
+		RefSpecs:   []gitconfig.RefSpec{"+refs/tags/*:refs/tags/*"},
+	})
 }
 
 func (g *GitRepo) Amend(message string) error {
