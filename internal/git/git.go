@@ -98,11 +98,63 @@ func (g *GitRepo) GetGraph(limit int) (string, error) {
 	return string(out), nil
 }
 
-func (g *GitRepo) GetStatus() (string, error) {
-	cmd := exec.Command("git", "status", "--short")
-	cmd.Dir = g.Path
-	out, _ := cmd.CombinedOutput()
-	return string(out), nil
+type StatusItem struct {
+	Path     string
+	Staged   bool
+	Status   string
+	IsFile   bool
+}
+
+func (g *GitRepo) GetStatusItems() ([]StatusItem, error) {
+	w, err := g.Repo.Worktree()
+	if err != nil {
+		return nil, err
+	}
+	status, err := w.Status()
+	if err != nil {
+		return nil, err
+	}
+
+	var items []StatusItem
+	for path, s := range status {
+		staged := s.Staging != git.Unmodified && s.Staging != git.Untracked
+		statusStr := string(s.Staging)
+		if s.Staging == git.Unmodified || s.Staging == git.Untracked {
+			statusStr = string(s.Worktree)
+		}
+		
+		items = append(items, StatusItem{
+			Path:   path,
+			Staged: staged,
+			Status: statusStr,
+			IsFile: true,
+		})
+	}
+	return items, nil
+}
+
+func (g *GitRepo) StageFile(path string) error {
+	w, err := g.Repo.Worktree()
+	if err != nil {
+		return err
+	}
+	_, err = w.Add(path)
+	return err
+}
+
+func (g *GitRepo) UnstageFile(path string) error {
+	w, err := g.Repo.Worktree()
+	if err != nil {
+		return err
+	}
+	// go-git doesn't have a direct "unstage" that matches 'git reset HEAD <file>' easily in one call
+	// but we can use Reset with a specific file
+	head, err := g.Repo.Head()
+	if err != nil {
+		// If no HEAD, we might be in an empty repo, just Reset might work
+		return w.Reset(&git.ResetOptions{Files: []string{path}})
+	}
+	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{path}})
 }
 
 func (g *GitRepo) Fetch() error {

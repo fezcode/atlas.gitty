@@ -38,7 +38,7 @@ type tab int
 
 const (
 	tabGraph tab = iota
-	tabStatus
+	tabStage
 	tabBranches
 	tabTags
 	tabRemotes
@@ -86,9 +86,9 @@ type keyMap struct {
 var keys = keyMap{
 	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left tab")),
-	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right tab")),
-	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
+	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev tab")),
+	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next tab")),
+	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "action")),
 	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Help:  key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -150,6 +150,10 @@ type Model struct {
 	commitIdx     int
 	currentBranch string
 	
+	// Stage view
+	statusItems []git.StatusItem
+	statusIdx   int
+
 	// Viewports
 	logViewport    viewport.Model
 	contentViewport viewport.Model
@@ -365,14 +369,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case focusLog:
 				switch {
 				case key.Matches(msg, keys.Up):
-					if m.commitIdx > 0 {
-						m.commitIdx--
-						m.updateDiffFromCommit()
+					switch m.activeTab {
+					case tabGraph:
+						if m.commitIdx > 0 { m.commitIdx--; m.updateDiffFromCommit() }
+					case tabStage:
+						if m.statusIdx > 0 { m.statusIdx--; m.updateDiffFromStatus() }
 					}
 				case key.Matches(msg, keys.Down):
-					if m.commitIdx < len(m.commits)-1 {
-						m.commitIdx++
-						m.updateDiffFromCommit()
+					switch m.activeTab {
+					case tabGraph:
+						if m.commitIdx < len(m.commits)-1 { m.commitIdx++; m.updateDiffFromCommit() }
+					case tabStage:
+						if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.updateDiffFromStatus() }
+					}
+				case key.Matches(msg, keys.Enter):
+					if m.activeTab == tabStage && len(m.statusItems) > 0 {
+						item := m.statusItems[m.statusIdx]
+						var err error
+						if item.Staged {
+							err = m.currentRepo.UnstageFile(item.Path)
+						} else {
+							err = m.currentRepo.StageFile(item.Path)
+						}
+						if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
 					}
 				case key.Matches(msg, keys.Left):
 					m.activeTab = (m.activeTab + 6) % 7
@@ -541,6 +560,7 @@ func (m *Model) refreshRepoData() {
 	if m.currentRepo == nil { return }
 	m.currentBranch, _ = m.currentRepo.GetCurrentBranch()
 	m.commits, _ = m.currentRepo.GetCommits(100)
+	m.statusItems, _ = m.currentRepo.GetStatusItems()
 	
 	// Sidebar items
 	var items []list.Item
@@ -561,7 +581,12 @@ func (m *Model) refreshRepoData() {
 	m.sidebarList.SetItems(items)
 
 	m.refreshTabContent()
-	m.updateDiffFromCommit()
+	
+	if m.activeTab == tabStage {
+		m.updateDiffFromStatus()
+	} else {
+		m.updateDiffFromCommit()
+	}
 }
 
 func (m *Model) refreshTabContent() {
@@ -571,9 +596,8 @@ func (m *Model) refreshTabContent() {
 	case tabGraph:
 		g, _ := m.currentRepo.GetGraph(100)
 		m.logViewport.SetContent(g)
-	case tabStatus:
-		s, _ := m.currentRepo.GetStatus()
-		m.logViewport.SetContent(s)
+	case tabStage:
+		m.renderStageView()
 	case tabBranches:
 		b, _ := m.currentRepo.GetBranches()
 		m.logViewport.SetContent(HeaderStyle.Render("BRANCHES") + "\n\n" + strings.Join(b, "\n"))
@@ -590,25 +614,50 @@ func (m *Model) refreshTabContent() {
 		helpText := HeaderStyle.Render("ATLAS.GIT USAGE GUIDE") + "\n\n" +
 			SelectedStyle.Render("LAYOUT") + "\n" +
 			"• Sidebar (Left): Shows branches, tags, and remotes.\n" +
-			"• Top Pane (Right): Active tab content (Graph, Status, etc.).\n" +
-			"• Bottom Pane (Right): Detailed diff of the selected commit.\n\n" +
+			"• Top Pane (Right): Active tab content (Graph, Stage, etc.).\n" +
+			"• Bottom Pane (Right): Detailed diff of the selection.\n\n" +
 			SelectedStyle.Render("NAVIGATION") + "\n" +
 			"• Tab / Shift+Tab: Cycle focus between panes.\n" +
 			"• Arrows / HJKL: Navigate lists and viewports.\n" +
 			"• Left / Right: Switch between tabs (when Top Pane is focused).\n\n" +
+			SelectedStyle.Render("STAGE TAB") + "\n" +
+			"• Arrows: Navigate file list.\n" +
+			"• Enter: Stage/Unstage selected file.\n" +
+			"• c: Commit staged changes.\n\n" +
 			SelectedStyle.Render("GIT COMMANDS (GLOBAL)") + "\n" +
-			"• f: Fetch from origin\n" +
-			"• p: Pull from origin\n" +
-			"• P: Push to origin\n" +
-			"• c: Commit staged changes\n" +
-			"• a: Amend last commit\n" +
-			"• v: Cherry-pick selected commit\n" +
-			"• S: Switch branch (manual input)\n" +
+			"• f: Fetch | p: Pull | P: Push\n" +
+			"• c: Commit | a: Amend | v: Cherry-pick | S: Switch branch\n" +
 			"• r: Refresh repository data\n\n" +
-			SelectedStyle.Render("SIDEBAR INTERACTION") + "\n" +
-			"• Enter: Checkout selected branch from the sidebar list."
+			SelectedStyle.Render("SIDEBAR") + "\n" +
+			"• Enter: Checkout selected branch."
 		m.logViewport.SetContent(helpText)
 	}
+}
+
+func (m *Model) renderStageView() {
+	var sb strings.Builder
+	sb.WriteString(HeaderStyle.Render("STAGING AREA (Press ENTER to stage/unstage)") + "\n\n")
+	if len(m.statusItems) == 0 {
+		sb.WriteString(InactiveStyle.Render("  Working tree clean."))
+	} else {
+		for i, item := range m.statusItems {
+			prefix := "  "
+			if i == m.statusIdx { prefix = "> " }
+			
+			box := "[ ]"
+			if item.Staged { box = "[x]" }
+			
+			line := fmt.Sprintf("%s %s %s (%s)", prefix, box, item.Path, item.Status)
+			if i == m.statusIdx {
+				sb.WriteString(SelectedStyle.Render(line) + "\n")
+			} else if item.Staged {
+				sb.WriteString(SuccessStyle.Render(line) + "\n")
+			} else {
+				sb.WriteString(line + "\n")
+			}
+		}
+	}
+	m.logViewport.SetContent(sb.String())
 }
 
 func (m *Model) updateDiffFromCommit() {
@@ -618,6 +667,19 @@ func (m *Model) updateDiffFromCommit() {
 		if err == nil {
 			m.contentViewport.SetContent(diff)
 		}
+	}
+}
+
+func (m *Model) updateDiffFromStatus() {
+	if len(m.statusItems) > 0 && m.statusIdx < len(m.statusItems) {
+		path := m.statusItems[m.statusIdx].Path
+		diff, err := m.currentRepo.GetDiff(path)
+		if err == nil {
+			if diff == "" { diff = "No changes or binary file." }
+			m.contentViewport.SetContent(diff)
+		}
+	} else {
+		m.contentViewport.SetContent("")
 	}
 }
 
@@ -711,7 +773,7 @@ func (m Model) renderMain() string {
 	sidebar := sbStyle.Render(m.sidebarList.View())
 
 	// Tabs
-	tabs := []string{"LOG", "STATUS", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP"}
+	tabs := []string{"LOG", "STAGE", "BRANCHES", "TAGS", "REMOTES", "DIFF", "HELP"}
 	tabHeader := ""
 	for i, t := range tabs {
 		style := InactiveStyle.Copy().Padding(0, 1)
