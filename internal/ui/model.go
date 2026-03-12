@@ -30,6 +30,7 @@ type focusArea int
 
 const (
 	focusSidebar focusArea = iota
+	focusActions
 	focusLog
 	focusContent
 )
@@ -71,39 +72,21 @@ type keyMap struct {
 	Help    key.Binding
 	Tab     key.Binding
 	ShiftTab key.Binding
-	
-	Fetch      key.Binding
-	Pull       key.Binding
-	Push       key.Binding
-	Commit     key.Binding
-	Amend      key.Binding
-	CherryPick key.Binding
-	Checkout   key.Binding
-	Refresh    key.Binding
-	Delete     key.Binding
+	Delete  key.Binding
 }
 
 var keys = keyMap{
 	Up:    key.NewBinding(key.WithKeys("up", "k"), key.WithHelp("↑/k", "up")),
 	Down:  key.NewBinding(key.WithKeys("down", "j"), key.WithHelp("↓/j", "down")),
-	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "prev tab")),
-	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "next tab")),
-	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "action")),
+	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
+	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
+	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select/action")),
 	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Help:  key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next focus")),
 	ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev focus")),
-
-	Fetch:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch")),
-	Pull:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
-	Push:       key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "push")),
-	Commit:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "commit")),
-	Amend:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "amend")),
-	CherryPick: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "cherry-pick")),
-	Checkout:   key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "switch branch")),
-	Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Delete:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete")),
+	Delete:  key.NewBinding(key.WithKeys("x", "delete"), key.WithHelp("x", "delete")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -114,8 +97,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Tab, k.ShiftTab, k.Enter, k.Back},
-		{k.Fetch, k.Pull, k.Push, k.Commit, k.Amend},
-		{k.CherryPick, k.Checkout, k.Refresh, k.Delete, k.Quit},
+		{k.Quit},
 	}
 }
 
@@ -153,6 +135,9 @@ type Model struct {
 	// Stage view
 	statusItems []git.StatusItem
 	statusIdx   int
+
+	// Action Bar
+	actionIdx int
 
 	// Viewports
 	logViewport    viewport.Model
@@ -291,60 +276,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 
 		case mainView:
-			// Global MainView Keys
 			if key.Matches(msg, keys.Tab) {
-				m.focus = (m.focus + 1) % 3
+				m.focus = (m.focus + 1) % 4
 				return m, nil
 			}
 			if key.Matches(msg, keys.ShiftTab) {
-				m.focus = (m.focus + 2) % 3
+				m.focus = (m.focus + 3) % 4
 				return m, nil
-			}
-			if key.Matches(msg, keys.Refresh) {
-				m.refreshRepoData()
-				m.setStatus("Refreshed.", false)
-				return m, nil
-			}
-			if key.Matches(msg, keys.Fetch) {
-				m.setStatus("Fetching...", false)
-				go func() { _ = m.currentRepo.Fetch() }()
-				return m, nil
-			}
-			if key.Matches(msg, keys.Pull) {
-				m.setStatus("Pulling...", false)
-				err := m.currentRepo.Pull()
-				if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pulled.", false); m.refreshRepoData() }
-				return m, nil
-			}
-			if key.Matches(msg, keys.Push) {
-				m.setStatus("Pushing...", false)
-				err := m.currentRepo.Push()
-				if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
-				return m, nil
-			}
-			if key.Matches(msg, keys.Commit) {
-				m.openDialog(dialogCommit, "Commit message...")
-				return m, nil
-			}
-			if key.Matches(msg, keys.Amend) {
-				m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
-				return m, nil
-			}
-			if key.Matches(msg, keys.Checkout) {
-				m.openDialog(dialogCheckout, "Branch name to switch to...")
-				return m, nil
-			}
-			if key.Matches(msg, keys.CherryPick) {
-				if len(m.commits) > 0 {
-					hash := strings.Split(m.commits[m.commitIdx], " ")[0]
-					m.openDialog(dialogCherryPick, "Cherry-pick " + hash + "? (enter to confirm)")
-					m.textInput.SetValue(hash)
-					return m, nil
-				}
 			}
 
 			switch m.focus {
 			case focusSidebar:
+				if key.Matches(msg, keys.Right) { m.focus = focusLog; return m, nil }
 				switch {
 				case key.Matches(msg, keys.Enter):
 					if i := m.sidebarList.SelectedItem(); i != nil {
@@ -366,9 +309,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.sidebarList, cmd = m.sidebarList.Update(msg)
 				cmds = append(cmds, cmd)
 
+			case focusActions:
+				actions := m.getActionsForTab()
+				switch {
+				case key.Matches(msg, keys.Left):
+					if m.actionIdx > 0 { m.actionIdx-- }
+				case key.Matches(msg, keys.Right):
+					if m.actionIdx < len(actions)-1 { m.actionIdx++ }
+				case key.Matches(msg, keys.Down):
+					m.focus = focusLog
+				case key.Matches(msg, keys.Enter):
+					if len(actions) > 0 {
+						m.executeAction(actions[m.actionIdx])
+					}
+				}
+
 			case focusLog:
 				switch {
 				case key.Matches(msg, keys.Up):
+					if m.activeTab == tabGraph && m.commitIdx == 0 { m.focus = focusActions; return m, nil }
+					if m.activeTab == tabStage && m.statusIdx == 0 { m.focus = focusActions; return m, nil }
+					
 					switch m.activeTab {
 					case tabGraph:
 						if m.commitIdx > 0 { m.commitIdx--; m.updateDiffFromCommit() }
@@ -394,11 +355,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
 					}
 				case key.Matches(msg, keys.Left):
-					m.activeTab = (m.activeTab + 6) % 7
-					m.refreshTabContent()
+					if m.activeTab > 0 {
+						m.activeTab--
+						m.actionIdx = 0
+						m.refreshTabContent()
+					} else {
+						m.focus = focusSidebar
+					}
 				case key.Matches(msg, keys.Right):
-					m.activeTab = (m.activeTab + 1) % 7
-					m.refreshTabContent()
+					if m.activeTab < 6 {
+						m.activeTab++
+						m.actionIdx = 0
+						m.refreshTabContent()
+					}
 				}
 				m.logViewport, cmd = m.logViewport.Update(msg)
 				cmds = append(cmds, cmd)
@@ -436,14 +405,70 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *Model) getActionsForTab() []string {
+	switch m.activeTab {
+	case tabGraph:
+		return []string{"FETCH", "PULL", "PUSH", "CHERRY-PICK", "REFRESH"}
+	case tabStage:
+		return []string{"COMMIT", "AMEND", "STAGE ALL", "UNSTAGE ALL", "REFRESH"}
+	case tabBranches:
+		return []string{"NEW BRANCH", "REFRESH"}
+	case tabTags:
+		return []string{"NEW TAG", "REFRESH"}
+	case tabRemotes:
+		return []string{"REFRESH"}
+	default:
+		return []string{"REFRESH"}
+	}
+}
+
+func (m *Model) executeAction(action string) {
+	switch action {
+	case "FETCH":
+		m.setStatus("Fetching...", false)
+		go func() { _ = m.currentRepo.Fetch() }()
+	case "PULL":
+		m.setStatus("Pulling...", false)
+		err := m.currentRepo.Pull()
+		if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pulled.", false); m.refreshRepoData() }
+	case "PUSH":
+		m.setStatus("Pushing...", false)
+		err := m.currentRepo.Push()
+		if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
+	case "COMMIT":
+		m.openDialog(dialogCommit, "Commit message...")
+	case "AMEND":
+		m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
+	case "STAGE ALL":
+		err := m.currentRepo.StageAll()
+		if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
+	case "UNSTAGE ALL":
+		err := m.currentRepo.UnstageAll()
+		if err == nil { m.refreshRepoData() } else { m.setStatus("Error: "+err.Error(), true) }
+	case "CHERRY-PICK":
+		if len(m.commits) > 0 {
+			hash := strings.Split(m.commits[m.commitIdx], " ")[0]
+			m.openDialog(dialogCherryPick, "Cherry-pick " + hash + "? (enter to confirm)")
+			m.textInput.SetValue(hash)
+		}
+	case "NEW BRANCH":
+		m.openDialog(dialogCreateBranch, "New branch name...")
+	case "NEW TAG":
+		m.openDialog(dialogCreateTag, "New tag name...")
+	case "REFRESH":
+		m.refreshRepoData()
+		m.setStatus("Refreshed.", false)
+	}
+}
+
 func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
 	
 	sidebarWidth := 30
 	mainWidth := m.width - sidebarWidth
-	headerHeight := 2 // Text + Border
-	footerHeight := 2 // Text + Border
-	contentHeight := m.height - headerHeight - footerHeight - 2 // -2 for JoinVertical gaps
+	headerHeight := 2
+	footerHeight := 2
+	contentHeight := m.height - headerHeight - footerHeight - 2
 	
 	if contentHeight < 10 { contentHeight = 10 }
 	
@@ -452,11 +477,14 @@ func (m *Model) updateSizes() {
 	
 	m.sidebarList.SetSize(sidebarWidth-2, contentHeight-2)
 	
+	// -1 tabHeader, -1 spacer, -1 actionBar, -1 spacer, -2 borders = -6
 	m.logViewport.Width = mainWidth - 4
-	m.logViewport.Height = logHeight - 3 // -1 for tab header, -2 for borders
+	m.logViewport.Height = logHeight - 6 
+	if m.logViewport.Height < 1 { m.logViewport.Height = 1 }
 	
 	m.contentViewport.Width = mainWidth - 4
 	m.contentViewport.Height = viewHeight - 2
+	if m.contentViewport.Height < 1 { m.contentViewport.Height = 1 }
 }
 
 func (m *Model) openDialog(t dialogType, placeholder string) {
@@ -481,7 +509,7 @@ func (m *Model) openMultiDialog(t dialogType, p1, p2 string) {
 
 func (m *Model) handleDialogSubmit() {
 	v1 := m.textInput.Value()
-	if v1 == "" && m.activeDlg != dialogCommit { return }
+	if v1 == "" && m.activeDlg != dialogCommit && m.activeDlg != dialogAmend { return }
 
 	var err error
 	switch m.activeDlg {
@@ -537,6 +565,20 @@ func (m *Model) handleDialogSubmit() {
 		if err == nil {
 			m.setStatus("Switched to "+v1, false)
 		} else { m.setStatus("Switch failed: "+err.Error(), true) }
+		m.state = mainView
+		m.refreshRepoData()
+	case dialogCreateBranch:
+		err = m.currentRepo.CreateBranch(v1)
+		if err == nil {
+			m.setStatus("Branch created: "+v1, false)
+		} else { m.setStatus("Create failed: "+err.Error(), true) }
+		m.state = mainView
+		m.refreshRepoData()
+	case dialogCreateTag:
+		err = m.currentRepo.CreateTag(v1)
+		if err == nil {
+			m.setStatus("Tag created: "+v1, false)
+		} else { m.setStatus("Create failed: "+err.Error(), true) }
 		m.state = mainView
 		m.refreshRepoData()
 	}
@@ -613,23 +655,18 @@ func (m *Model) refreshTabContent() {
 	case tabHelp:
 		helpText := HeaderStyle.Render("ATLAS.GIT USAGE GUIDE") + "\n\n" +
 			SelectedStyle.Render("LAYOUT") + "\n" +
-			"• Sidebar (Left): Shows branches, tags, and remotes.\n" +
-			"• Top Pane (Right): Active tab content (Graph, Stage, etc.).\n" +
-			"• Bottom Pane (Right): Detailed diff of the selection.\n\n" +
+			"• Sidebar (Left): Branches, tags, remotes.\n" +
+			"• Action Bar: Tab-specific commands (Fetch, Commit, etc.).\n" +
+			"• Top Pane: Active tab content.\n" +
+			"• Bottom Pane: Detailed diff of selection.\n\n" +
 			SelectedStyle.Render("NAVIGATION") + "\n" +
-			"• Tab / Shift+Tab: Cycle focus between panes.\n" +
-			"• Arrows / HJKL: Navigate lists and viewports.\n" +
-			"• Left / Right: Switch between tabs (when Top Pane is focused).\n\n" +
+			"• Tab / Shift+Tab: Cycle focus between areas.\n" +
+			"• Arrows / HJKL: Navigate lists.\n" +
+			"• Left / Right: Switch tabs (when Top Pane is focused).\n" +
+			"• Action Bar: Press UP from list to reach buttons, then Left/Right/Enter.\n\n" +
 			SelectedStyle.Render("STAGE TAB") + "\n" +
-			"• Arrows: Navigate file list.\n" +
 			"• Enter: Stage/Unstage selected file.\n" +
-			"• c: Commit staged changes.\n\n" +
-			SelectedStyle.Render("GIT COMMANDS (GLOBAL)") + "\n" +
-			"• f: Fetch | p: Pull | P: Push\n" +
-			"• c: Commit | a: Amend | v: Cherry-pick | S: Switch branch\n" +
-			"• r: Refresh repository data\n\n" +
-			SelectedStyle.Render("SIDEBAR") + "\n" +
-			"• Enter: Checkout selected branch."
+			"• Reach Action Bar (Up) -> Select COMMIT to finalize changes."
 		m.logViewport.SetContent(helpText)
 	}
 }
@@ -783,13 +820,24 @@ func (m Model) renderMain() string {
 		tabHeader += style.Render(t)
 	}
 
+	// Action Bar
+	actionItems := m.getActionsForTab()
+	actionBar := ""
+	for i, a := range actionItems {
+		style := InactiveStyle.Copy().Padding(0, 1).Background(DarkGray)
+		if m.focus == focusActions && i == m.actionIdx {
+			style = SelectedStyle.Copy().Padding(0, 1).Background(Magenta).Foreground(White)
+		}
+		actionBar += style.Render(a) + " "
+	}
+
 	// Log/Graph area
 	logStyle := MainBoxStyle.Copy().Width(mainWidth).Height(logHeight)
 	if m.focus == focusLog {
 		logStyle = logStyle.BorderForeground(Magenta)
 	}
 	
-	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabHeader, m.logViewport.View()))
+	logArea := logStyle.Render(lipgloss.JoinVertical(lipgloss.Left, tabHeader, "\n", actionBar, "\n", m.logViewport.View()))
 
 	// Content/Diff area
 	contentStyle := MainBoxStyle.Copy().Width(mainWidth).Height(viewHeight)

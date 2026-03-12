@@ -157,6 +157,27 @@ func (g *GitRepo) UnstageFile(path string) error {
 	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{path}})
 }
 
+func (g *GitRepo) StageAll() error {
+	w, err := g.Repo.Worktree()
+	if err != nil {
+		return err
+	}
+	_, err = w.Add(".")
+	return err
+}
+
+func (g *GitRepo) UnstageAll() error {
+	w, err := g.Repo.Worktree()
+	if err != nil {
+		return err
+	}
+	head, err := g.Repo.Head()
+	if err != nil {
+		return w.Reset(&git.ResetOptions{Files: []string{"."}})
+	}
+	return w.Reset(&git.ResetOptions{Commit: head.Hash(), Files: []string{"."}})
+}
+
 func (g *GitRepo) Fetch() error {
 	return g.Repo.Fetch(&git.FetchOptions{RemoteName: "origin"})
 }
