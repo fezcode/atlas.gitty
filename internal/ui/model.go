@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -72,6 +73,8 @@ const (
 	dialogDeleteBranch
 	dialogDeleteTag
 	dialogDeleteRemote
+	dialogUnlistRepo
+	dialogNukeRepo
 )
 
 type keyMap struct {
@@ -441,7 +444,7 @@ func (m *Model) getActionsForTab() []string {
 	case tabBranches: return []string{"NEW BRANCH", "DELETE BRANCH", "REFRESH"}
 	case tabTags: return []string{"NEW TAG", "DELETE TAG", "PUSH TAGS", "REFRESH"}
 	case tabRemotes: return []string{"ADD REMOTE", "DELETE REMOTE", "REFRESH"}
-	case tabRepo: return []string{"OPEN IN EXPLORER", "REFRESH"}
+	case tabRepo: return []string{"OPEN IN EXPLORER", "UNLIST REPO", "NUKE REPO", "REFRESH"}
 	default: return []string{"REFRESH"}
 	}
 }
@@ -468,6 +471,8 @@ func (m *Model) executeAction(action string) {
 	case "ADD REMOTE": m.openMultiDialog(dialogAddRemote, "Remote Name (e.g. origin)", "Remote URL")
 	case "DELETE REMOTE": if len(m.remoteList) > 0 { name := strings.Split(m.remoteList[m.remoteIdx], " ")[0]; m.openDialog(dialogDeleteRemote, "Type remote name to DELETE: "+name) }
 	case "OPEN IN EXPLORER": openExplorer(m.currentRepo.Path)
+	case "UNLIST REPO": m.openDialog(dialogUnlistRepo, "Type 'YES' to remove repo from list (NOT disk)")
+	case "NUKE REPO": m.openDialog(dialogNukeRepo, "Type 'YES' to DELETE repo from DISK forever!")
 	case "REFRESH": m.refreshRepoData(); m.setStatus("Refreshed.", false)
 	}
 }
@@ -490,10 +495,7 @@ func (m *Model) handleDialogSubmit() {
 	case dialogAddRepo: repo, errOpen := git.OpenRepo(v1); if errOpen == nil { m.cfg.AddRepository(repo.Path); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Repo added.", false) } else { m.setStatus("Invalid git repo: "+errOpen.Error(), true) }; m.state = welcomeView; return
 	case dialogCloneRepo:
 		dest := v2
-		if !filepath.IsAbs(dest) {
-			cwd, _ := filepath.Abs(".")
-			dest = filepath.Join(cwd, v2)
-		}
+		if !filepath.IsAbs(dest) { cwd, _ := filepath.Abs("."); dest = filepath.Join(cwd, v2) }
 		m.setStatus("Cloning to "+dest+"...", false); err = git.CloneRepo(v1, dest); if err == nil { m.cfg.AddRepository(dest); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Cloned.", false) } else { m.setStatus("Clone failed: "+err.Error(), true) }; m.state = welcomeView; return
 	case dialogInitRepo: err = git.InitRepo(v1); if err == nil { m.cfg.AddRepository(v1); _ = m.cfg.Save(); m.updateRepoList(); m.setStatus("Initialized.", false) } else { m.setStatus("Init failed: "+err.Error(), true) }; m.state = welcomeView; return
 	case dialogCommit: err = m.currentRepo.Commit(v1); if err == nil { m.setStatus("Committed.", false) } else { m.setStatus("Commit failed: "+err.Error(), true) }
@@ -506,6 +508,20 @@ func (m *Model) handleDialogSubmit() {
 	case dialogDeleteTag: err = m.currentRepo.DeleteTag(v1); if err == nil { m.setStatus("Tag deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
 	case dialogAddRemote: err = m.currentRepo.CreateRemote(v1, v2); if err == nil { m.setStatus("Remote added: "+v1, false) } else { m.setStatus("Add failed: "+err.Error(), true) }
 	case dialogDeleteRemote: err = m.currentRepo.DeleteRemote(v1); if err == nil { m.setStatus("Remote deleted: "+v1, false) } else { m.setStatus("Delete failed: "+err.Error(), true) }
+	case dialogUnlistRepo:
+		if strings.ToUpper(v1) == "YES" {
+			m.cfg.RemoveRepository(m.currentRepo.Path); _ = m.cfg.Save(); m.updateRepoList()
+			m.currentRepo = nil; m.state = welcomeView; m.setStatus("Repo unlisted.", false); return
+		}
+	case dialogNukeRepo:
+		if strings.ToUpper(v1) == "YES" {
+			path := m.currentRepo.Path
+			m.cfg.RemoveRepository(path); _ = m.cfg.Save(); m.updateRepoList()
+			err = os.RemoveAll(path)
+			m.currentRepo = nil; m.state = welcomeView
+			if err == nil { m.setStatus("Repo NUKED from disk.", false) } else { m.setStatus("Nuke error: "+err.Error(), true) }
+			return
+		}
 	}
 	if err != nil { m.setStatus("Error: "+err.Error(), true) }
 	m.state = mainView; m.refreshRepoData()
@@ -515,7 +531,7 @@ func (m *Model) updateSizes() {
 	m.repoList.SetSize(m.width-4, m.height-6)
 	sidebarWidth := 26; mainWidth := m.width - sidebarWidth - 4
 	if mainWidth < 10 { mainWidth = 10 }
-	headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 2
+	headerHeight := 2; footerHeight := 2; contentHeight := m.height - headerHeight - footerHeight - 4
 	if contentHeight < 10 { contentHeight = 10 }
 	logHeight := contentHeight / 2; viewHeight := contentHeight - logHeight
 	m.sidebarList.SetSize(sidebarWidth-4, contentHeight-2)
@@ -592,7 +608,7 @@ func (m *Model) refreshTabContent() {
 	case tabRepo:
 		m.logViewport.SetContent(HeaderStyle.Render("REPOSITORY SETTINGS") + "\n\n" +
 			"Path: " + m.currentRepo.Path + "\n\n" +
-			"Use the Action Bar above to open this folder in your OS explorer.")
+			"Use the Action Bar above to open folder, unlist, or NUKE the repo.")
 	}
 }
 
