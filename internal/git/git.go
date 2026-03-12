@@ -121,14 +121,39 @@ func (g *GitRepo) Push() error {
 	return g.Repo.Push(&git.PushOptions{RemoteName: "origin"})
 }
 
-func (g *GitRepo) Checkout(branch string) error {
-	w, err := g.Repo.Worktree()
-	if err != nil {
-		return err
+func (g *GitRepo) Amend(message string) error {
+	args := []string{"commit", "--amend", "--no-edit"}
+	if message != "" {
+		args = []string{"commit", "--amend", "-m", message}
 	}
-	return w.Checkout(&git.CheckoutOptions{
-		Branch: plumbing.NewBranchReferenceName(branch),
-	})
+	cmd := exec.Command("git", args...)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to amend: %v (output: %s)", err, string(out))
+	}
+	return nil
+}
+
+func (g *GitRepo) CherryPick(hash string) error {
+	cmd := exec.Command("git", "cherry-pick", hash)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to cherry-pick: %v (output: %s)", err, string(out))
+	}
+	return nil
+}
+
+func (g *GitRepo) Checkout(branch string) error {
+	// Using exec.Command for checkout to handle more cases (like new branches or remote tracking)
+	cmd := exec.Command("git", "checkout", branch)
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to checkout: %v (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 func (g *GitRepo) CreateBranch(name string) error {

@@ -55,6 +55,8 @@ const (
 	dialogAddRepo
 	dialogCloneRepo
 	dialogInitRepo
+	dialogAmend
+	dialogCherryPick
 )
 
 type keyMap struct {
@@ -69,12 +71,15 @@ type keyMap struct {
 	Tab     key.Binding
 	ShiftTab key.Binding
 	
-	Fetch   key.Binding
-	Pull    key.Binding
-	Push    key.Binding
-	Commit  key.Binding
-	Refresh key.Binding
-	Delete  key.Binding
+	Fetch      key.Binding
+	Pull       key.Binding
+	Push       key.Binding
+	Commit     key.Binding
+	Amend      key.Binding
+	CherryPick key.Binding
+	Checkout   key.Binding
+	Refresh    key.Binding
+	Delete     key.Binding
 }
 
 var keys = keyMap{
@@ -89,12 +94,15 @@ var keys = keyMap{
 	Tab:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next focus")),
 	ShiftTab: key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "prev focus")),
 
-	Fetch:   key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch")),
-	Pull:    key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
-	Push:    key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "push")),
-	Commit:  key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "commit")),
-	Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-	Delete:  key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete")),
+	Fetch:      key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "fetch")),
+	Pull:       key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pull")),
+	Push:       key.NewBinding(key.WithKeys("P"), key.WithHelp("P", "push")),
+	Commit:     key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "commit")),
+	Amend:      key.NewBinding(key.WithKeys("a"), key.WithHelp("a", "amend")),
+	CherryPick: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "cherry-pick")),
+	Checkout:   key.NewBinding(key.WithKeys("S"), key.WithHelp("S", "switch branch")),
+	Refresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+	Delete:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "delete")),
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -105,7 +113,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Tab, k.ShiftTab, k.Enter, k.Back},
-		{k.Fetch, k.Pull, k.Push, k.Commit, k.Refresh, k.Delete, k.Quit},
+		{k.Fetch, k.Pull, k.Push, k.Commit, k.Amend},
+		{k.CherryPick, k.Checkout, k.Refresh, k.Delete, k.Quit},
 	}
 }
 
@@ -337,6 +346,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if err != nil { m.setStatus("Error: "+err.Error(), true) } else { m.setStatus("Pushed.", false) }
 				case key.Matches(msg, keys.Commit):
 					m.openDialog(dialogCommit, "Commit message...")
+				case key.Matches(msg, keys.Amend):
+					m.openDialog(dialogAmend, "Amend message (leave empty to keep current)...")
+				case key.Matches(msg, keys.CherryPick):
+					if len(m.commits) > 0 {
+						hash := strings.Split(m.commits[m.commitIdx], " ")[0]
+						m.openDialog(dialogCherryPick, "Cherry-pick " + hash + "? (enter to confirm)")
+						m.textInput.SetValue(hash)
+					}
+				case key.Matches(msg, keys.Checkout):
+					m.openDialog(dialogCheckout, "Branch name to switch to...")
 				case key.Matches(msg, keys.Left):
 					m.activeTab = (m.activeTab + 5) % 6
 					m.refreshTabContent()
@@ -460,6 +479,27 @@ func (m *Model) handleDialogSubmit() {
 		if err == nil {
 			m.setStatus("Committed.", false)
 		} else { m.setStatus("Commit failed: "+err.Error(), true) }
+		m.state = mainView
+		m.refreshRepoData()
+	case dialogAmend:
+		err = m.currentRepo.Amend(v1)
+		if err == nil {
+			m.setStatus("Amended.", false)
+		} else { m.setStatus("Amend failed: "+err.Error(), true) }
+		m.state = mainView
+		m.refreshRepoData()
+	case dialogCherryPick:
+		err = m.currentRepo.CherryPick(v1)
+		if err == nil {
+			m.setStatus("Cherry-picked.", false)
+		} else { m.setStatus("Cherry-pick failed: "+err.Error(), true) }
+		m.state = mainView
+		m.refreshRepoData()
+	case dialogCheckout:
+		err = m.currentRepo.Checkout(v1)
+		if err == nil {
+			m.setStatus("Switched to "+v1, false)
+		} else { m.setStatus("Switch failed: "+err.Error(), true) }
 		m.state = mainView
 		m.refreshRepoData()
 	}
