@@ -83,6 +83,7 @@ type keyMap struct {
 	Left    key.Binding
 	Right   key.Binding
 	Enter   key.Binding
+	Space   key.Binding
 	Back    key.Binding
 	Quit    key.Binding
 	Help    key.Binding
@@ -99,6 +100,7 @@ var keys = keyMap{
 	Left:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "left")),
 	Right: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "right")),
 	Enter: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "enter/action")),
+	Space: key.NewBinding(key.WithKeys(" "), key.WithHelp("space", "diff")),
 	Back:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "exit/back")),
 	Quit:  key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q", "quit")),
 	Help:  key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
@@ -110,14 +112,14 @@ var keys = keyMap{
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Tab, k.PrevTab, k.NextTab, k.Enter, k.Back, k.Quit}
+	return []key.Binding{k.Tab, k.PrevTab, k.NextTab, k.Enter, k.Space, k.Back, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Tab, k.ShiftTab, k.PrevTab, k.NextTab},
-		{k.Enter, k.Back, k.Quit},
+		{k.Enter, k.Space, k.Back, k.Quit},
 	}
 }
 
@@ -361,6 +363,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.moveDown()
 						case key.Matches(msg, keys.Enter):
 							m.handleListEnter()
+						case key.Matches(msg, keys.Space):
+							if m.activeTab == tabStage {
+								m.updateDiffFromStatus()
+							} else if m.activeTab == tabGraph {
+								m.updateDiffFromCommit()
+							}
 						}
 						if m.activeTab != tabGraph && m.activeTab != tabStage && m.activeTab != tabBranches && m.activeTab != tabTags && m.activeTab != tabRemotes {
 							m.logViewport, cmd = m.logViewport.Update(msg)
@@ -401,8 +409,8 @@ func (m *Model) isAtTop() bool {
 
 func (m *Model) moveUp() {
 	switch m.activeTab {
-	case tabGraph: if m.commitIdx > 0 { m.commitIdx--; m.refreshTabContent(); m.updateDiffFromCommit() }
-	case tabStage: if m.statusIdx > 0 { m.statusIdx--; m.refreshTabContent(); m.updateDiffFromStatus() }
+	case tabGraph: if m.commitIdx > 0 { m.commitIdx--; m.refreshTabContent() }
+	case tabStage: if m.statusIdx > 0 { m.statusIdx--; m.refreshTabContent() }
 	case tabBranches: if m.branchIdx > 0 { m.branchIdx--; m.refreshTabContent() }
 	case tabTags: if m.tagIdx > 0 { m.tagIdx--; m.refreshTabContent() }
 	case tabRemotes: if m.remoteIdx > 0 { m.remoteIdx--; m.refreshTabContent() }
@@ -411,8 +419,8 @@ func (m *Model) moveUp() {
 
 func (m *Model) moveDown() {
 	switch m.activeTab {
-	case tabGraph: if m.commitIdx < len(m.graphLines)-1 { m.commitIdx++; m.refreshTabContent(); m.updateDiffFromCommit() }
-	case tabStage: if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.refreshTabContent(); m.updateDiffFromStatus() }
+	case tabGraph: if m.commitIdx < len(m.graphLines)-1 { m.commitIdx++; m.refreshTabContent() }
+	case tabStage: if m.statusIdx < len(m.statusItems)-1 { m.statusIdx++; m.refreshTabContent() }
 	case tabBranches: if m.branchIdx < len(m.branchList)-1 { m.branchIdx++; m.refreshTabContent() }
 	case tabTags: if m.tagIdx < len(m.tagList)-1 { m.tagIdx++; m.refreshTabContent() }
 	case tabRemotes: if m.remoteIdx < len(m.remoteList)-1 { m.remoteIdx++; m.refreshTabContent() }
@@ -691,8 +699,8 @@ func (m *Model) refreshTabContent() {
 			"• If authentication fails (e.g. SSH/HTTPS creds), it falls back to system 'git' CLI.\n" +
 			"• This allows leveraging your system's Git credential helpers automatically.\n\n" +
 			SelectedStyle.Render("TABS") + "\n" +
-			"• LOG: Browse commits. Enter on commit to see diff below.\n" +
-			"• STAGE: Enter on file to toggle Stage/Unstage. Top Action Bar has COMMIT.\n" +
+			"• LOG: Browse commits. Press Space on commit to see diff below.\n" +
+			"• STAGE: Enter to toggle Stage/Unstage. Press Space to see diff. Top Action Bar has COMMIT.\n" +
 			"• BRANCHES/TAGS/REMOTES: Browse and manage items using Action Bar."
 		m.logViewport.SetContent(helpText)
 	case tabRepo:
@@ -708,7 +716,8 @@ func (m *Model) renderListView(title string, list []string, idx *int) {
 		for i, item := range list { prefix := "  "; if i == *idx { prefix = "> " }; line := prefix + item; if i == *idx { sb.WriteString(SelectedStyle.Render(line) + "\n") } else { sb.WriteString(line + "\n") } }
 	}
 	m.logViewport.SetContent(sb.String())
-	if *idx < m.logViewport.YOffset { m.logViewport.YOffset = *idx } else if *idx >= m.logViewport.YOffset+m.logViewport.Height { m.logViewport.YOffset = *idx - m.logViewport.Height + 1 }
+	targetLine := *idx + 2
+	if targetLine < m.logViewport.YOffset { m.logViewport.YOffset = targetLine } else if targetLine >= m.logViewport.YOffset+m.logViewport.Height { m.logViewport.YOffset = targetLine - m.logViewport.Height + 1 }
 }
 
 func (m *Model) renderGraphView() {
@@ -719,12 +728,15 @@ func (m *Model) renderGraphView() {
 }
 
 func (m *Model) renderStageView() {
-	var sb strings.Builder; sb.WriteString(HeaderStyle.Render("STAGING AREA") + "\n\n")
-	if len(m.statusItems) == 0 { sb.WriteString(InactiveStyle.Render("  Working tree clean.")) } else {
+	count := len(m.statusItems)
+	title := fmt.Sprintf("STAGING AREA (%d files)", count)
+	var sb strings.Builder; sb.WriteString(HeaderStyle.Render(title) + "\n\n")
+	if count == 0 { sb.WriteString(InactiveStyle.Render("  Working tree clean.")) } else {
 		for i, item := range m.statusItems { prefix := "  "; if i == m.statusIdx { prefix = "> " }; box := "[ ]"; if item.Staged { box = "[x]" }; line := fmt.Sprintf("%s %s %s (%s)", prefix, box, item.Path, item.Status); if i == m.statusIdx { sb.WriteString(SelectedStyle.Render(line) + "\n") } else if item.Staged { sb.WriteString(SuccessStyle.Render(line) + "\n") } else { sb.WriteString(line + "\n") } }
 	}
 	m.logViewport.SetContent(sb.String())
-	if m.statusIdx < m.logViewport.YOffset { m.logViewport.YOffset = m.statusIdx } else if m.statusIdx >= m.logViewport.YOffset+m.logViewport.Height { m.logViewport.YOffset = m.statusIdx - m.logViewport.Height + 1 }
+	targetLine := m.statusIdx + 2
+	if targetLine < m.logViewport.YOffset { m.logViewport.YOffset = targetLine } else if targetLine >= m.logViewport.YOffset+m.logViewport.Height { m.logViewport.YOffset = targetLine - m.logViewport.Height + 1 }
 }
 
 func (m *Model) updateDiffFromCommit() {

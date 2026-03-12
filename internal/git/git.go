@@ -107,23 +107,38 @@ type StatusItem struct {
 }
 
 func (g *GitRepo) GetStatusItems() ([]StatusItem, error) {
-	w, err := g.Repo.Worktree()
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return nil, err
-	}
-	status, err := w.Status()
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("git status failed: %v (output: %s)", err, string(out))
 	}
 
 	var items []StatusItem
-	for path, s := range status {
-		staged := s.Staging != git.Unmodified && s.Staging != git.Untracked
-		statusStr := string(s.Staging)
-		if s.Staging == git.Unmodified || s.Staging == git.Untracked {
-			statusStr = string(s.Worktree)
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		if len(line) < 4 {
+			continue
 		}
 		
+		staging := line[0]
+		worktree := line[1]
+		path := line[3:]
+		
+		// Handle renamed files: "R  old -> new"
+		if staging == 'R' {
+			parts := strings.Split(path, " -> ")
+			if len(parts) > 1 {
+				path = parts[1]
+			}
+		}
+
+		staged := staging != ' ' && staging != '?'
+		statusStr := string(staging)
+		if staging == ' ' || staging == '?' {
+			statusStr = string(worktree)
+		}
+
 		items = append(items, StatusItem{
 			Path:   path,
 			Staged: staged,
@@ -365,7 +380,7 @@ func (g *GitRepo) GetCommitDiff(hash string) (string, error) {
 }
 
 func (g *GitRepo) GetDiff(path string) (string, error) {
-	cmd := exec.Command("git", "diff", "--color=always", path)
+	cmd := exec.Command("git", "diff", "--color=always", "--ignore-submodules", "-a", path)
 	cmd.Dir = g.Path
 	out, err := cmd.CombinedOutput()
 	if err != nil {
