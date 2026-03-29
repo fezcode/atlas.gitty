@@ -823,10 +823,14 @@ func (m *Model) updateDiffFromCommit() {
 
 func (m *Model) updateDiffFromStatus() {
 	if len(m.statusItems) > 0 && m.statusIdx < len(m.statusItems) {
-		diff, err := m.currentRepo.GetDiff(m.statusItems[m.statusIdx].Path)
+		item := m.statusItems[m.statusIdx]
+		diff, err := m.currentRepo.GetStatusDiff(item)
 		if err == nil {
-			if diff == "" { diff = "No changes or binary file." }
-			m.contentViewport.SetContent(diff); m.contentViewport.GotoTop()
+			if diff == "" {
+				diff = "No changes or binary file."
+			}
+			m.contentViewport.SetContent(diff)
+			m.contentViewport.GotoTop()
 			return
 		}
 	}

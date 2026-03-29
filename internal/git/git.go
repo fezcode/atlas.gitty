@@ -383,6 +383,28 @@ func (g *GitRepo) GetDiff(path string) (string, error) {
 	return strings.ReplaceAll(string(out), "\r", "^M"), nil
 }
 
+func (g *GitRepo) GetStatusDiff(item StatusItem) (string, error) {
+	var cmd *exec.Cmd
+	if item.Status == "?" || item.Status == "??" {
+		// For untracked files, show them as a new file diff
+		cmd = exec.Command("git", "diff", "--no-index", "--color=always", "/dev/null", item.Path)
+	} else if item.Staged {
+		cmd = exec.Command("git", "diff", "--cached", "--color=always", "--ignore-submodules", "-a", item.Path)
+	} else {
+		cmd = exec.Command("git", "diff", "--color=always", "--ignore-submodules", "-a", item.Path)
+	}
+
+	cmd.Dir = g.Path
+	out, err := cmd.CombinedOutput()
+	
+	// git diff --no-index exits with 1 if there is a diff
+	if err != nil && cmd.ProcessState != nil && cmd.ProcessState.ExitCode() != 1 {
+		return "", fmt.Errorf("git diff failed: %v (output: %s)", err, string(out))
+	}
+	
+	return strings.ReplaceAll(string(out), "\r", "^M"), nil
+}
+
 func (g *GitRepo) Commit(message string) error {
 	cmd := exec.Command("git", "commit", "-m", message)
 	cmd.Dir = g.Path
